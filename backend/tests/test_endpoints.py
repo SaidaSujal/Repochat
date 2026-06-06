@@ -37,6 +37,7 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
+    app.state.limiter.enabled = False
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
@@ -63,6 +64,7 @@ async def test_ingest_repository_success(monkeypatch):
         with open(os.path.join(target_dir, "main.py"), "w") as f:
             f.write("print('Hello World')")
     monkeypatch.setattr(GitHubService, "clone_repository", mock_clone)
+    monkeypatch.setattr(GitHubService, "get_commit_sha", lambda target_dir: "a" * 40)
 
     # Mock Gemini Service calls
     monkeypatch.setattr(GeminiService, "get_embeddings", lambda self, texts: [[0.1] * 768] * len(texts))
@@ -207,11 +209,15 @@ async def test_expired_repository_handling(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_ingest_rate_limiting(monkeypatch):
+    # Enable rate limiting for this test
+    app.state.limiter.enabled = True
+
     # Mock ingestion functions to skip external calls
     async def mock_validate(github_url):
         return {"owner": "limiter", "name": "repo", "star_count": 0, "fork_count": 0, "language": "Py", "total_size_bytes": 100}
     monkeypatch.setattr(GitHubService, "validate_repository", mock_validate)
     monkeypatch.setattr(GitHubService, "clone_repository", lambda url, target_dir: os.makedirs(target_dir, exist_ok=True))
+    monkeypatch.setattr(GitHubService, "get_commit_sha", lambda target_dir: "b" * 40)
     monkeypatch.setattr(GeminiService, "get_embeddings", lambda self, texts: [[0.1] * 768] * len(texts))
     monkeypatch.setattr(GeminiService, "generate_summary_and_architecture", lambda self, r, f, rd: ("s", "a"))
     monkeypatch.setattr(VectorDBService, "add_chunks", lambda self, r, c, e: None)
@@ -332,4 +338,81 @@ async def test_chat_query_validation_failures():
         # 3. Too long query (>1000 characters)
         res_long = await ac.post("/api/repositories/1/chat", json={"query": "a" * 1001})
         assert res_long.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_ingest_repository_saves_and_returns_sha(monkeypatch):
+    # Mock GitHub validation API
+    async def mock_validate(github_url):
+        return {
+            "owner": "test-owner",
+            "name": "test-repo",
+            "star_count": 100,
+            "fork_count": 20,
+            "language": "Python",
+            "total_size_bytes": 50000
+        }
+    monkeypatch.setattr(GitHubService, "validate_repository", mock_validate)
+
+    # Mock cloning to create mock main.py
+    def mock_clone(url, target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+        with open(os.path.join(target_dir, "main.py"), "w") as f:
+            f.write("print('Hello World')")
+    monkeypatch.setattr(GitHubService, "clone_repository", mock_clone)
+
+    # Mock git SHA extraction
+    mock_sha = "f" * 40
+    monkeypatch.setattr(GitHubService, "get_commit_sha", lambda target_dir: mock_sha)
+
+    # Mock Gemini Service calls
+    monkeypatch.setattr(GeminiService, "get_embeddings", lambda self, texts: [[0.1] * 768] * len(texts))
+    monkeypatch.setattr(GeminiService, "generate_summary_and_architecture", 
+                        lambda self, repo_name, file_paths, readme_content: ("Mock summary", "Mock architecture"))
+
+    # Mock Vector DB Service storage
+    monkeypatch.setattr(VectorDBService, "add_chunks", lambda self, repo_id, chunks, embeddings: None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post("/api/ingest", json={"github_url": "https://github.com/test-owner/test-repo"})
+        
+    assert response.status_code == 200
+    data = response.json()
+    assert data["commit_sha"] == mock_sha
+
+
+@pytest.mark.asyncio
+async def test_backward_compatibility_null_sha(monkeypatch):
+    # Setup: Insert an active repository directly into test DB with commit_sha = None
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(hours=2)
+    
+    test_repo = Repository(
+        id=88,
+        github_url="https://github.com/legacy/repo",
+        owner="legacy",
+        name="repo",
+        star_count=50,
+        fork_count=10,
+        language="Python",
+        file_count=2,
+        total_size_bytes=10000,
+        summary="A test repository summary",
+        architecture_overview="A test architecture overview",
+        commit_sha=None, # Explicit legacy state
+        created_at=now_utc.replace(tzinfo=None),
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    
+    async with TestSessionLocal() as session:
+        session.add(test_repo)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get("/api/repositories/88")
+        
+    assert response.status_code == 200
+    data = response.json()
+    assert data["commit_sha"] is None  # Ensures it serializes correctly without error
+
 

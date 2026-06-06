@@ -35,6 +35,7 @@ class RepositoryResponse(BaseModel):
     total_size_bytes: int
     summary: Optional[str]
     architecture_overview: Optional[str]
+    commit_sha: Optional[str] = None
     created_at: datetime
     expires_at: datetime
 

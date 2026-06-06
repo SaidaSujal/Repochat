@@ -133,3 +133,83 @@ async def test_cleanup_expired_repositories():
     await engine.dispose()
 
 
+def test_github_service_get_commit_sha(monkeypatch):
+    from backend.services.github import GitHubService, GitHubServiceError
+    import subprocess
+
+    class MockCompletedProcess:
+        def __init__(self, stdout, returncode=0, stderr=""):
+            self.stdout = stdout
+            self.returncode = returncode
+            self.stderr = stderr
+
+    # 1. Test success case with a valid 40-character hex SHA
+    valid_sha = "a" * 40
+    def mock_run_success(*args, **kwargs):
+        return MockCompletedProcess(stdout=valid_sha)
+    monkeypatch.setattr(subprocess, "run", mock_run_success)
+    
+    sha = GitHubService.get_commit_sha("/dummy/path")
+    assert sha == valid_sha
+
+    # 2. Test failure case with a malformed SHA (too short)
+    short_sha = "abc123"
+    def mock_run_short(*args, **kwargs):
+        return MockCompletedProcess(stdout=short_sha)
+    monkeypatch.setattr(subprocess, "run", mock_run_short)
+    
+    with pytest.raises(GitHubServiceError) as exc:
+        GitHubService.get_commit_sha("/dummy/path")
+    assert "invalid SHA" in str(exc.value)
+
+    # 3. Test failure case with a malformed SHA (invalid chars)
+    invalid_char_sha = "g" * 40
+    def mock_run_invalid_chars(*args, **kwargs):
+        return MockCompletedProcess(stdout=invalid_char_sha)
+    monkeypatch.setattr(subprocess, "run", mock_run_invalid_chars)
+    
+    with pytest.raises(GitHubServiceError) as exc:
+        GitHubService.get_commit_sha("/dummy/path")
+    assert "invalid SHA" in str(exc.value)
+
+    # 4. Test git command failing (subprocess error)
+    def mock_run_error(*args, **kwargs):
+        raise subprocess.CalledProcessError(returncode=1, cmd="git rev-parse HEAD", stderr="fatal: not a git repository")
+    monkeypatch.setattr(subprocess, "run", mock_run_error)
+
+    with pytest.raises(GitHubServiceError) as exc:
+        GitHubService.get_commit_sha("/dummy/path")
+    assert "Failed to get commit SHA" in str(exc.value)
+
+
+def test_commit_sha_validation_on_repository():
+    # 1. Valid SHA
+    repo = Repository(
+        github_url="https://github.com/test/val1",
+        owner="test",
+        name="val1",
+        commit_sha="a" * 40
+    )
+    assert repo.commit_sha == "a" * 40
+
+    # 2. None value (backward compatibility)
+    repo_none = Repository(
+        github_url="https://github.com/test/val2",
+        owner="test",
+        name="val2",
+        commit_sha=None
+    )
+    assert repo_none.commit_sha is None
+
+    # 3. Invalid SHA format raises ValueError
+    with pytest.raises(ValueError) as exc:
+        Repository(
+            github_url="https://github.com/test/val3",
+            owner="test",
+            name="val3",
+            commit_sha="g" * 40
+        )
+    assert "Invalid commit SHA" in str(exc.value)
+
+
+

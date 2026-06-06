@@ -315,7 +315,7 @@ export default function ChatPage({ params }: PageProps) {
                                   Referenced Code Snippets
                                 </span>
                                 {message.response.code_snippets.map((snippet, sIdx) => (
-                                  <SnippetBox key={sIdx} snippet={snippet} repoUrl={repo?.github_url || ''} />
+                                   <SnippetBox key={sIdx} snippet={snippet} repoUrl={repo?.github_url || ''} revision={repo?.commit_sha || 'HEAD'} />
                                 ))}
                               </div>
                             )}
@@ -327,7 +327,8 @@ export default function ChatPage({ params }: PageProps) {
                                 </span>
                                 <div className="flex flex-wrap gap-2">
                                   {message.response.citations.map((citation, cIdx) => {
-                                    const fileUrl = repo ? `${repo.github_url}/blob/HEAD/${citation.file_path}#L${citation.start_line}-L${citation.end_line}` : '#';
+                                    const revision = repo?.commit_sha || 'HEAD';
+                                    const fileUrl = repo ? `${repo.github_url}/blob/${revision}/${citation.file_path}#L${citation.start_line}-L${citation.end_line}` : '#';
                                     return (
                                       <a
                                         key={cIdx}
@@ -440,7 +441,7 @@ export default function ChatPage({ params }: PageProps) {
   );
 }
 
-function SnippetBox({ snippet, repoUrl }: { snippet: CodeSnippet; repoUrl: string }) {
+function SnippetBox({ snippet, repoUrl, revision }: { snippet: CodeSnippet; repoUrl: string; revision?: string }) {
   const [collapsed, setCollapsed] = useState(true);
   const [copied, setCopied] = useState(false);
 
@@ -458,7 +459,7 @@ function SnippetBox({ snippet, repoUrl }: { snippet: CodeSnippet; repoUrl: strin
   const startLine = parseInt(linesArr[0], 10) || 1;
   const endLine = parseInt(linesArr[1], 10) || 1;
   
-  const githubFileUrl = repoUrl ? `${repoUrl}/blob/HEAD/${snippet.file_path}#L${startLine}-L${endLine}` : '#';
+  const githubFileUrl = repoUrl ? `${repoUrl}/blob/${revision || 'HEAD'}/${snippet.file_path}#L${startLine}-L${endLine}` : '#';
 
   return (
     <div className="border border-gray-200 dark:border-zinc-800 rounded-xl overflow-hidden bg-white dark:bg-zinc-950">

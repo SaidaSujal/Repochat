@@ -14,6 +14,7 @@ export interface RepositoryResponse {
   total_size_bytes: number;
   summary: string | null;
   architecture_overview: string | null;
+  commit_sha?: string | null;
   created_at: string;
   expires_at: string;
 }

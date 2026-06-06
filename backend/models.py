@@ -2,6 +2,11 @@ from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime
 from backend.database import Base
 
+from sqlalchemy.orm import validates
+import re
+
+COMMIT_SHA_REGEX = re.compile(r"^[0-9a-f]{40}$")
+
 class Repository(Base):
     __tablename__ = "repositories"
 
@@ -9,6 +14,17 @@ class Repository(Base):
     github_url = Column(String, unique=True, index=True, nullable=False)
     owner = Column(String, nullable=False)
     name = Column(String, nullable=False)
+    commit_sha = Column(String(40), nullable=True)
+
+    @validates("commit_sha")
+    def validate_commit_sha(self, key, value):
+        if value is not None:
+            # Strip whitespace just in case
+            val_str = str(value).strip()
+            if len(val_str) != 40 or not COMMIT_SHA_REGEX.match(val_str):
+                raise ValueError(f"Invalid commit SHA: {value}. Must be a 40-character hexadecimal string.")
+            return val_str
+        return value
     
     # Repo stats
     star_count = Column(Integer, default=0)

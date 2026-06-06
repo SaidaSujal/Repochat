@@ -5,7 +5,7 @@ from typing import Dict, Any
 from fastapi import FastAPI, Depends, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -51,6 +51,11 @@ async def lifespan(app: FastAPI):
     # Auto-initialize database tables if not present
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Idempotent migration check: verify if commit_sha column exists
+        res = await conn.execute(text("PRAGMA table_info(repositories)"))
+        columns = [row[1] for row in res.fetchall()]
+        if "commit_sha" not in columns:
+            await conn.execute(text("ALTER TABLE repositories ADD COLUMN commit_sha VARCHAR(40)"))
         
     # Start cache expiration background task
     cleanup_task = asyncio.create_task(cache_cleanup_loop())

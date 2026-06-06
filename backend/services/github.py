@@ -128,6 +128,32 @@ class GitHubService:
 
 
     @staticmethod
+    def get_commit_sha(target_dir: str) -> str:
+        """
+        Retrieve the current HEAD commit SHA of the cloned repository.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=target_dir,
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10.0
+            )
+            sha = result.stdout.strip()
+            import re
+            if len(sha) != 40 or not re.match(r"^[0-9a-f]{40}$", sha):
+                raise GitHubServiceError(f"Cloned repository returned an invalid SHA: {sha}")
+            return sha
+        except subprocess.TimeoutExpired:
+            raise GitHubServiceError("Retrieving commit SHA timed out.")
+        except subprocess.CalledProcessError as e:
+            raise GitHubServiceError(f"Failed to get commit SHA: {e.stderr.strip()}")
+        except Exception as e:
+            raise GitHubServiceError(f"Failed to get repository commit SHA: {str(e)}")
+
+    @staticmethod
     def cleanup_directory(target_dir: str) -> None:
         """
         Securely remove a directory. Ensures directory is inside a temporary layout.

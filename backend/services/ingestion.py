@@ -46,6 +46,7 @@ class IngestionService:
             temp_dir = tempfile.mkdtemp(prefix="repochat_")
             try:
                 GitHubService.clone_repository(github_url, temp_dir)
+                commit_sha = GitHubService.get_commit_sha(temp_dir)
                 
                 # 5. Parse files to chunks
                 parser = ParserService()
@@ -95,6 +96,7 @@ class IngestionService:
                     github_url=github_url,
                     owner=repo_meta["owner"],
                     name=repo_meta["name"],
+                    commit_sha=commit_sha,
                     star_count=repo_meta["star_count"],
                     fork_count=repo_meta["fork_count"],
                     language=repo_meta["language"],
