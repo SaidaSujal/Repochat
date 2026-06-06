@@ -1,10 +1,12 @@
 import pytest
+import asyncio
 from httpx import AsyncClient, ASGITransport
 import os
 import tempfile
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from backend.database import Base, get_db
 from backend.main import app
@@ -13,6 +15,7 @@ from backend.schemas import ChatResponse, CodeSnippet, Citation
 from backend.services.github import GitHubService
 from backend.services.gemini import GeminiService
 from backend.services.vector_db import VectorDBService
+from backend.services.ingestion import IngestionService
 
 # In-memory SQLite async engine for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -36,7 +39,11 @@ async def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture(autouse=True)
-async def setup_db():
+async def setup_db(monkeypatch):
+    import backend.database
+    import backend.main
+    monkeypatch.setattr(backend.database, "AsyncSessionLocal", TestSessionLocal)
+    monkeypatch.setattr(backend.main, "AsyncSessionLocal", TestSessionLocal)
     app.state.limiter.enabled = False
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -81,9 +88,20 @@ async def test_ingest_repository_success(monkeypatch):
     data = response.json()
     assert data["owner"] == "test-owner"
     assert data["name"] == "test-repo"
-    assert data["summary"] == "Mock summary"
-    assert data["architecture_overview"] == "Mock architecture"
-    assert data["file_count"] == 1
+    assert data["status"] == "PENDING"
+
+    # Wait for the background task to run
+    await asyncio.sleep(0.1)
+
+    repo_id = data["id"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        meta_res = await ac.get(f"/api/repositories/{repo_id}")
+        assert meta_res.status_code == 200
+        meta_data = meta_res.json()
+        assert meta_data["status"] == "COMPLETED"
+        assert meta_data["summary"] == "Mock summary"
+        assert meta_data["architecture_overview"] == "Mock architecture"
+        assert meta_data["file_count"] == 1
 
 
 @pytest.mark.asyncio
@@ -111,6 +129,7 @@ async def test_chat_success_and_metadata_endpoints(monkeypatch):
         total_size_bytes=10000,
         summary="A test repository summary",
         architecture_overview="A test architecture overview",
+        status="COMPLETED",
         created_at=now_utc.replace(tzinfo=None),
         expires_at=expires_at.replace(tzinfo=None)
     )
@@ -178,6 +197,7 @@ async def test_expired_repository_handling(monkeypatch):
         name="repo",
         summary="Expired Summary",
         architecture_overview="Expired Arch",
+        status="COMPLETED",
         created_at=(now_utc - timedelta(hours=26)).replace(tzinfo=None),
         expires_at=expired_at.replace(tzinfo=None)
     )
@@ -378,7 +398,18 @@ async def test_ingest_repository_saves_and_returns_sha(monkeypatch):
         
     assert response.status_code == 200
     data = response.json()
-    assert data["commit_sha"] == mock_sha
+    assert data["status"] == "PENDING"
+
+    # Wait for the background task to run
+    await asyncio.sleep(0.1)
+
+    repo_id = data["id"]
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        meta_res = await ac.get(f"/api/repositories/{repo_id}")
+        assert meta_res.status_code == 200
+        meta_data = meta_res.json()
+        assert meta_data["status"] == "COMPLETED"
+        assert meta_data["commit_sha"] == mock_sha
 
 
 @pytest.mark.asyncio
@@ -400,6 +431,7 @@ async def test_backward_compatibility_null_sha(monkeypatch):
         summary="A test repository summary",
         architecture_overview="A test architecture overview",
         commit_sha=None, # Explicit legacy state
+        status="COMPLETED",
         created_at=now_utc.replace(tzinfo=None),
         expires_at=expires_at.replace(tzinfo=None)
     )
@@ -414,5 +446,163 @@ async def test_backward_compatibility_null_sha(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["commit_sha"] is None  # Ensures it serializes correctly without error
+
+
+@pytest.mark.asyncio
+async def test_ingestion_status_workflow(monkeypatch):
+    # Mock GitHub validation API
+    async def mock_validate(github_url):
+        return {
+            "owner": "test-owner",
+            "name": "test-repo",
+            "star_count": 100,
+            "fork_count": 20,
+            "language": "Python",
+            "total_size_bytes": 50000
+        }
+    monkeypatch.setattr(GitHubService, "validate_repository", mock_validate)
+
+    # Prevent background task from executing automatically to check PENDING status
+    background_task_run = False
+    async def mock_process(repo_id):
+        nonlocal background_task_run
+        background_task_run = True
+    monkeypatch.setattr(IngestionService, "process_ingestion", mock_process)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.post("/api/ingest", json={"github_url": "https://github.com/test-owner/test-repo"})
+        
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "PENDING"
+    assert data["error_message"] is None
+    assert background_task_run is True  # Verify background task was queued/triggered
+
+
+@pytest.mark.asyncio
+async def test_chat_summarize_rejects_pending_or_processing(monkeypatch):
+    # Insert PENDING repository directly into test DB
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(hours=2)
+    
+    pending_repo = Repository(
+        id=77,
+        github_url="https://github.com/pending/repo",
+        owner="pending",
+        name="repo",
+        star_count=10,
+        fork_count=2,
+        language="Python",
+        file_count=0,
+        total_size_bytes=1000,
+        status="PENDING",
+        created_at=now_utc.replace(tzinfo=None),
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    
+    async with TestSessionLocal() as session:
+        session.add(pending_repo)
+        await session.commit()
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # 1. Chat fails
+        chat_res = await ac.post("/api/repositories/77/chat", json={"query": "test query"})
+        assert chat_res.status_code == 400
+        assert "not yet complete" in chat_res.json()["detail"]
+
+        # 2. Summary fails
+        sum_res = await ac.get("/api/repositories/77/summary")
+        assert sum_res.status_code == 400
+        assert "not available yet" in sum_res.json()["detail"]
+
+        # 3. Architecture fails
+        arch_res = await ac.get("/api/repositories/77/architecture")
+        assert arch_res.status_code == 400
+        assert "not available yet" in arch_res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ingestion_states(monkeypatch):
+    # Mock GitHub validation API
+    async def mock_validate(github_url):
+        return {
+            "owner": "dup-owner",
+            "name": "dup-repo",
+            "star_count": 100,
+            "fork_count": 20,
+            "language": "Python",
+            "total_size_bytes": 50000
+        }
+    monkeypatch.setattr(GitHubService, "validate_repository", mock_validate)
+
+    # Mock background process to do nothing
+    monkeypatch.setattr(IngestionService, "process_ingestion", lambda repo_id: None)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # First request creates PENDING repo
+        res1 = await ac.post("/api/ingest", json={"github_url": "https://github.com/dup-owner/dup-repo"})
+        assert res1.status_code == 200
+        id1 = res1.json()["id"]
+
+        # Second request returns the same PENDING repo immediately without double insertion
+        res2 = await ac.post("/api/ingest", json={"github_url": "https://github.com/dup-owner/dup-repo"})
+        assert res2.status_code == 200
+        id2 = res2.json()["id"]
+        
+        assert id1 == id2
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery(monkeypatch):
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(hours=2)
+    
+    # Seed stuck PROCESSING repo and stuck PENDING repo
+    repo_processing = Repository(
+        id=200,
+        github_url="https://github.com/stuck/processing",
+        owner="stuck",
+        name="proc",
+        status="PROCESSING",
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    repo_pending = Repository(
+        id=201,
+        github_url="https://github.com/stuck/pending",
+        owner="stuck",
+        name="pend",
+        status="PENDING",
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    
+    async with TestSessionLocal() as session:
+        session.add_all([repo_processing, repo_pending])
+        await session.commit()
+
+    # Track if process_ingestion is called on pending repo during recovery
+    requeued_repo_ids = []
+    async def mock_process(repo_id):
+        requeued_repo_ids.append(repo_id)
+    monkeypatch.setattr(IngestionService, "process_ingestion", mock_process)
+
+    # Trigger recovery lifespan context manually
+    async with app.router.lifespan_context(app):
+        # Allow recovery tasks to spin up in background
+        await asyncio.sleep(0.1)
+
+    # Verify database states
+    async with TestSessionLocal() as session:
+        res1 = await session.execute(select(Repository).where(Repository.id == 200))
+        repo_proc = res1.scalar_one_or_none()
+        assert repo_proc.status == "FAILED"
+        assert "interrupted by a server restart" in repo_proc.error_message
+
+        res2 = await session.execute(select(Repository).where(Repository.id == 201))
+        repo_pend = res2.scalar_one_or_none()
+        assert repo_pend.status == "PENDING"  # Remains pending in DB and was re-queued
+
+    # Confirms PENDING repo was re-queued
+    assert 201 in requeued_repo_ids
+
 
 

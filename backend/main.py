@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi import FastAPI, Depends, HTTPException, Request, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
@@ -51,12 +51,38 @@ async def lifespan(app: FastAPI):
     # Auto-initialize database tables if not present
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Idempotent migration check: verify if commit_sha column exists
+        # Idempotent migration check: verify if commit_sha, status, and error_message columns exist
         res = await conn.execute(text("PRAGMA table_info(repositories)"))
         columns = [row[1] for row in res.fetchall()]
         if "commit_sha" not in columns:
             await conn.execute(text("ALTER TABLE repositories ADD COLUMN commit_sha VARCHAR(40)"))
+        if "status" not in columns:
+            await conn.execute(text("ALTER TABLE repositories ADD COLUMN status VARCHAR(20) DEFAULT 'COMPLETED'"))
+        if "error_message" not in columns:
+            await conn.execute(text("ALTER TABLE repositories ADD COLUMN error_message TEXT"))
         
+    # Recovery check on startup
+    async with AsyncSessionLocal() as session:
+        # 1. Update PROCESSING -> FAILED
+        from sqlalchemy import update
+        await session.execute(
+            update(Repository)
+            .where(Repository.status == "PROCESSING")
+            .values(
+                status="FAILED",
+                error_message="Ingestion was interrupted by a server restart. Please click retry to re-index."
+            )
+        )
+        await session.commit()
+        
+        # 2. Automatically re-queue PENDING records
+        res_pending = await session.execute(
+            select(Repository).where(Repository.status == "PENDING")
+        )
+        pending_repos = res_pending.scalars().all()
+        for repo in pending_repos:
+            asyncio.create_task(IngestionService.process_ingestion(repo.id))
+
     # Start cache expiration background task
     cleanup_task = asyncio.create_task(cache_cleanup_loop())
     
@@ -126,10 +152,11 @@ async def get_active_repository(repo_id: int, db: AsyncSession) -> Repository:
 async def ingest_repository(
     request: Request,
     payload: RepositoryIngestRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db)
 ):
     try:
-        repo = await IngestionService.ingest_repository(payload.github_url, db)
+        repo = await IngestionService.ingest_repository(payload.github_url, db, background_tasks)
         return repo
     except IngestionServiceError as e:
         raise HTTPException(
@@ -158,7 +185,12 @@ async def chat_about_repository(
     db: AsyncSession = Depends(get_db)
 ):
     # Verify repository is active and exists
-    await get_active_repository(repo_id, db)
+    repo = await get_active_repository(repo_id, db)
+    if repo.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Repository ingestion is not yet complete. Current status: {repo.status}"
+        )
     
     try:
         rag_service = RAGService()
@@ -203,6 +235,11 @@ async def get_repository_summary(
     db: AsyncSession = Depends(get_db)
 ):
     repo = await get_active_repository(repo_id, db)
+    if repo.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Repository summary is not available yet. Current status: {repo.status}"
+        )
     return {"summary": repo.summary or "Summary not available."}
 
 @app.get(
@@ -217,6 +254,11 @@ async def get_repository_architecture(
     db: AsyncSession = Depends(get_db)
 ):
     repo = await get_active_repository(repo_id, db)
+    if repo.status != "COMPLETED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Repository architecture overview is not available yet. Current status: {repo.status}"
+        )
     return {"architecture_overview": repo.architecture_overview or "Architecture overview not available."}
 
 @app.get(

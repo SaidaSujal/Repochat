@@ -15,6 +15,8 @@ class Repository(Base):
     owner = Column(String, nullable=False)
     name = Column(String, nullable=False)
     commit_sha = Column(String(40), nullable=True)
+    status = Column(String(20), default="PENDING", nullable=False)
+    error_message = Column(Text, nullable=True)
 
     @validates("commit_sha")
     def validate_commit_sha(self, key, value):

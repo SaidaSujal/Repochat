@@ -36,6 +36,8 @@ class RepositoryResponse(BaseModel):
     summary: Optional[str]
     architecture_overview: Optional[str]
     commit_sha: Optional[str] = None
+    status: str
+    error_message: Optional[str] = None
     created_at: datetime
     expires_at: datetime
 
