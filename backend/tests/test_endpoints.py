@@ -231,3 +231,105 @@ async def test_ingest_rate_limiting(monkeypatch):
                 
     assert success_count <= 5
     assert blocked_by_limiter is True
+
+
+@pytest.mark.asyncio
+async def test_github_redirect_handling_success(monkeypatch):
+    """Test that httpx client follows redirects successfully during repository validation."""
+    from backend.services.github import GitHubService
+    
+    class MockResponse:
+        def __init__(self, status_code, json_data, text=""):
+            self.status_code = status_code
+            self._json_data = json_data
+            self.text = text
+        def json(self):
+            return self._json_data
+            
+    async def mock_get(self, url, headers=None):
+        return MockResponse(200, {
+            "owner": {"login": "redirected-owner"},
+            "name": "redirected-repo",
+            "private": False,
+            "size": 1000,
+            "stargazers_count": 10,
+            "forks_count": 5,
+            "language": "Python"
+        })
+        
+    from httpx import AsyncClient as HttpxAsyncClient
+    monkeypatch.setattr(HttpxAsyncClient, "get", mock_get)
+    
+    meta = await GitHubService.validate_repository("https://github.com/original-owner/original-repo")
+    assert meta["owner"] == "redirected-owner"
+    assert meta["name"] == "redirected-repo"
+    assert meta["star_count"] == 10
+    assert meta["fork_count"] == 5
+
+
+def test_gemini_quota_exhaustion_retry_and_backoff(monkeypatch):
+    """Test that GeminiService._call_with_retry retries on quota exhaustion and parses delay suggestions."""
+    from backend.services.gemini import GeminiService
+    import time
+    
+    sleep_calls = []
+    monkeypatch.setattr(time, "sleep", lambda secs: sleep_calls.append(secs))
+    
+    service = GeminiService()
+    attempts = 0
+    
+    def mock_function():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise Exception("429 ResourceExhausted: Quota exceeded. Please retry in seconds: 2.")
+        return "success_value"
+        
+    result = service._call_with_retry(mock_function)
+    assert result == "success_value"
+    assert attempts == 3
+    assert len(sleep_calls) == 2
+    assert sleep_calls[0] == 3.0
+    assert sleep_calls[1] == 3.0
+
+
+def test_gemini_daily_quota_exhaustion_failure(monkeypatch):
+    """Test that GeminiService._call_with_retry aborts immediately on daily quota exhaustion."""
+    from backend.services.gemini import GeminiService, GeminiServiceError
+    import time
+    
+    sleep_calls = []
+    monkeypatch.setattr(time, "sleep", lambda secs: sleep_calls.append(secs))
+    
+    service = GeminiService()
+    attempts = 0
+    
+    def mock_function():
+        nonlocal attempts
+        attempts += 1
+        raise Exception("429 ResourceExhausted: Quota exceeded for metric: generativelanguage.googleapis.com/embed_content_free_tier_requests, limit: 1000")
+        
+    with pytest.raises(GeminiServiceError) as exc_info:
+        service._call_with_retry(mock_function)
+        
+    assert "daily quota limit reached" in str(exc_info.value).lower()
+    assert attempts == 1
+    assert len(sleep_calls) == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_query_validation_failures():
+    """Test that empty and whitespace-only chat query payloads are rejected with 422 by Pydantic/FastAPI."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # 1. Empty query
+        res_empty = await ac.post("/api/repositories/1/chat", json={"query": ""})
+        assert res_empty.status_code == 422
+        
+        # 2. Whitespace-only query
+        res_whitespace = await ac.post("/api/repositories/1/chat", json={"query": "   \n\t  "})
+        assert res_whitespace.status_code == 422
+        
+        # 3. Too long query (>1000 characters)
+        res_long = await ac.post("/api/repositories/1/chat", json={"query": "a" * 1001})
+        assert res_long.status_code == 422
+

@@ -44,7 +44,14 @@ class RepositoryResponse(BaseModel):
 # --- Chat Interface Schemas ---
 
 class ChatRequest(BaseModel):
-    query: str = Field(..., max_length=1000, description="The user question about the codebase")
+    query: str = Field(..., min_length=1, max_length=1000, description="The user question about the codebase")
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Query must not be empty or whitespace-only")
+        return value
 
 class CodeSnippet(BaseModel):
     file_path: str = Field(..., description="Path to the file where the code is located")

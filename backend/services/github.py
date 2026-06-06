@@ -65,7 +65,7 @@ class GitHubService:
 
         api_url = f"https://api.github.com/repos/{owner}/{repo}"
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
             try:
                 response = await client.get(api_url, headers=headers)
             except httpx.RequestError as e:
@@ -91,9 +91,12 @@ class GitHubService:
                     f"Maximum allowed size is {settings.MAX_REPO_SIZE_MB}MB."
                 )
 
+            actual_owner = data.get("owner", {}).get("login", owner)
+            actual_repo = data.get("name", repo)
+
             return {
-                "owner": owner,
-                "name": repo,
+                "owner": actual_owner,
+                "name": actual_repo,
                 "star_count": data.get("stargazers_count", 0),
                 "fork_count": data.get("forks_count", 0),
                 "language": data.get("language", "Unknown"),

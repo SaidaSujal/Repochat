@@ -21,10 +21,11 @@ class GeminiService:
         self.generation_model = "gemini-3.5-flash"
         self.generation_fallback_model = "gemini-2.5-flash"
 
-    def _call_with_retry(self, func, *args, max_retries: int = 5, initial_backoff: float = 1.0, **kwargs):
+    def _call_with_retry(self, func, *args, max_retries: int = 10, initial_backoff: float = 2.0, **kwargs):
         """Execute a function with exponential backoff and jitter to survive rate limits."""
         backoff = initial_backoff
         last_exception = None
+        import re
         
         for attempt in range(max_retries):
             try:
@@ -35,6 +36,19 @@ class GeminiService:
                 err_str = str(e).lower()
                 is_rate_limit = "429" in err_str or "quota" in err_str or "rate limit" in err_str
                 
+                # Check for permanent daily quota limits
+                is_daily_limit = (
+                    "requestsperday" in err_str 
+                    or "perday" in err_str 
+                    or "per day" in err_str 
+                    or "daily" in err_str 
+                    or "limit: 1000" in err_str 
+                    or "limit: 1500" in err_str 
+                    or "exceeded your current quota" in err_str
+                )
+                if is_daily_limit:
+                    raise GeminiServiceError(f"Gemini API daily quota limit reached: {str(e)}") from e
+
                 if not is_rate_limit and attempt >= 2:
                     # If it's not a rate limit, only retry a couple times
                     raise GeminiServiceError(f"Gemini API failure: {str(e)}") from e
@@ -42,8 +56,18 @@ class GeminiService:
                 if attempt == max_retries - 1:
                     break
                 
-                # Sleep with jitter
-                sleep_time = backoff + random.uniform(0, 0.5)
+                # Check if there is an explicit retry delay recommended in the exception message
+                match = re.search(r"seconds:\s*(\d+)", err_str)
+                if match:
+                    sleep_time = float(match.group(1)) + 1.0
+                    print(f"[Gemini Quota] Rate limit hit. Server requested retry delay: {sleep_time}s. Sleeping... (Attempt {attempt+1}/{max_retries})")
+                else:
+                    # Exponential sleep with jitter, but if it is a rate limit, sleep at least 5s
+                    sleep_time = backoff + random.uniform(0, 1.0)
+                    if is_rate_limit:
+                        sleep_time = max(sleep_time, 5.0)
+                    print(f"[Gemini Rate Limit] Retrying in {sleep_time:.2f}s... (Attempt {attempt+1}/{max_retries})")
+                
                 time.sleep(sleep_time)
                 backoff *= 2.0
                 
@@ -61,7 +85,7 @@ class GeminiService:
             return []
 
         embeddings: List[List[float]] = []
-        batch_size = 50  # Keep batch size small to stay within rate/size limits
+        batch_size = 30  # Keep batch size smaller to stay within rate/size limits
         
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
@@ -92,7 +116,7 @@ class GeminiService:
             embeddings.extend(batch_embeddings)
             
             # Brief rate-limit protection sleep for free tier
-            time.sleep(0.5)
+            time.sleep(1.0)
             
         return embeddings
 
