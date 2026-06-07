@@ -46,8 +46,27 @@ class RepositoryResponse(BaseModel):
 
 # --- Chat Interface Schemas ---
 
+class HistoryMessage(BaseModel):
+    role: str = Field(..., description="Role of the sender: 'user' or 'assistant'")
+    content: str = Field(..., min_length=1, max_length=1000, description="Message text content")
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        if value not in ("user", "assistant"):
+            raise ValueError("role must be either 'user' or 'assistant'")
+        return value
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content must not be empty or whitespace-only")
+        return value
+
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="The user question about the codebase")
+    history: Optional[List[HistoryMessage]] = Field(default=[], description="Prior messages in this chat session")
 
     @field_validator("query")
     @classmethod
@@ -55,6 +74,14 @@ class ChatRequest(BaseModel):
         if not value.strip():
             raise ValueError("Query must not be empty or whitespace-only")
         return value
+
+    @field_validator("history")
+    @classmethod
+    def validate_history(cls, value: Optional[List[HistoryMessage]]) -> Optional[List[HistoryMessage]]:
+        if value is not None and len(value) > 6:
+            raise ValueError("History cannot exceed 6 messages")
+        return value
+
 
 class CodeSnippet(BaseModel):
     file_path: str = Field(..., description="Path to the file where the code is located")

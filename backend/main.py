@@ -194,7 +194,7 @@ async def chat_about_repository(
     
     try:
         rag_service = RAGService()
-        answer = await rag_service.answer_query(repo_id, payload.query, db)
+        answer = await rag_service.answer_query(repo_id, payload.query, db, history=payload.history)
         return answer
     except RAGServiceError as e:
         raise HTTPException(

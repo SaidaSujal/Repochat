@@ -1,10 +1,12 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+import asyncio
+
 from backend.models import Repository
 from backend.services.gemini import GeminiService
 from backend.services.vector_db import VectorDBService
-from backend.schemas import ChatResponse
+from backend.schemas import ChatResponse, HistoryMessage
 
 class RAGServiceError(Exception):
     pass
@@ -14,7 +16,7 @@ class RAGService:
         self.gemini_service = GeminiService()
         self.vector_db_service = VectorDBService()
 
-    async def answer_query(self, repo_id: int, query: str, db: AsyncSession) -> ChatResponse:
+    async def answer_query(self, repo_id: int, query: str, db: AsyncSession, history: Optional[List[HistoryMessage]] = None) -> ChatResponse:
         # Check if repository exists and is not expired
         stmt = select(Repository).where(Repository.id == repo_id)
         result = await db.execute(stmt)
@@ -24,24 +26,48 @@ class RAGService:
         if repo.is_expired():
             raise RAGServiceError("Repository cache has expired. Please re-ingest the repository.")
 
-        # 1. Embed query
+        # 1. Query Condensation: Generate standalone query using Gemini
+        hist_list = history or []
         try:
-            query_embeddings = self.gemini_service.get_embeddings([query])
+            standalone_query = await asyncio.to_thread(
+                self.gemini_service.generate_standalone_query,
+                query,
+                hist_list
+            )
+        except Exception as e:
+            # Safe fallback: if condensation fails, use original query
+            print(f"[RAG Warning] Condensation failed: {str(e)}. Falling back to original query.")
+            standalone_query = query
+
+        # 2. Embed condensed query
+        try:
+            query_embeddings = await asyncio.to_thread(self.gemini_service.get_embeddings, [standalone_query])
             if not query_embeddings:
                 raise RAGServiceError("Failed to generate embedding for the query.")
             query_embedding = query_embeddings[0]
         except Exception as e:
             raise RAGServiceError(f"Embedding generation error: {str(e)}")
 
-        # 2. Retrieve chunks from vector DB
+        # 3. Retrieve chunks from vector DB
         try:
-            retrieved_chunks = self.vector_db_service.query_chunks(repo_id, query_embedding, top_k=6)
+            retrieved_chunks = await asyncio.to_thread(
+                self.vector_db_service.query_chunks,
+                repo_id,
+                query_embedding,
+                top_k=6
+            )
         except Exception as e:
             raise RAGServiceError(f"Vector search error: {str(e)}")
 
-        # 3. Generate RAG answer
+        # 4. Generate RAG answer using retrieved chunks & chat history
         try:
-            chat_response = self.gemini_service.generate_rag_answer(query, retrieved_chunks)
+            chat_response = await asyncio.to_thread(
+                self.gemini_service.generate_rag_answer,
+                query,
+                retrieved_chunks,
+                hist_list
+            )
             return chat_response
         except Exception as e:
             raise RAGServiceError(f"Answer generation error: {str(e)}")
+

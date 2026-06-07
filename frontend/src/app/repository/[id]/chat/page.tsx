@@ -19,6 +19,7 @@ import {
   Code,
   Sparkles,
   Search,
+  Trash2,
   XCircle
 } from 'lucide-react';
 
@@ -52,15 +53,31 @@ export default function ChatPage({ params }: PageProps) {
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load repo metadata
+  // Load repo metadata and hydrate history
   useEffect(() => {
     const fetchMetadata = async () => {
       setRepoLoading(true);
       try {
         const data = await api.getRepositoryMetadata(repoId);
         setRepo(data);
+        
+        // Hydrate history from localStorage
+        const savedHistory = localStorage.getItem(`repochat_history_${repoId}`);
+        if (savedHistory) {
+          try {
+            setMessages(JSON.parse(savedHistory));
+          } catch (e) {
+            console.error('Failed to parse chat history', e);
+          }
+        }
       } catch (err: unknown) {
         console.error(err);
+        // Clean up localStorage key for this repo if it exists
+        try {
+          localStorage.removeItem(`repochat_history_${repoId}`);
+        } catch (e) {
+          console.error(e);
+        }
         // If 410 or 404, redirect back to dashboard which handles it cleanly
         router.push(`/repository/${repoId}`);
       } finally {
@@ -89,6 +106,17 @@ export default function ChatPage({ params }: PageProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isProcessing]);
 
+  const handleClearHistory = () => {
+    if (window.confirm("Are you sure you want to clear the conversation history for this repository?")) {
+      setMessages([]);
+      try {
+        localStorage.removeItem(`repochat_history_${repoId}`);
+      } catch (e) {
+        console.error('Failed to clear chat history', e);
+      }
+    }
+  };
+
   const handleSend = async (textToSend: string) => {
     if (!textToSend.trim() || isProcessing) return;
     
@@ -99,9 +127,22 @@ export default function ChatPage({ params }: PageProps) {
     const userMsgId = Math.random().toString(36).substring(7);
     const assistantMsgId = Math.random().toString(36).substring(7);
     
+    const newUserMsg: ChatMessage = { id: userMsgId, sender: 'user', text: userMessageText };
+    
+    // Build context history from the current state (before appending the new message)
+    const historyPayload = messages
+      .filter(msg => !msg.error && (msg.text || msg.response))
+      .map(msg => ({
+        role: msg.sender,
+        content: msg.sender === 'user'
+          ? (msg.text || '')
+          : (msg.response ? `${msg.response.short_answer}\n\n${msg.response.detailed_explanation}` : (msg.text || ''))
+      }))
+      .slice(-6);
+
     setMessages(prev => [
       ...prev,
-      { id: userMsgId, sender: 'user', text: userMessageText }
+      newUserMsg
     ]);
     
     setIsProcessing(true);
@@ -132,16 +173,22 @@ export default function ChatPage({ params }: PageProps) {
     }, 1800);
 
     try {
-      const chatRes = await api.chatAboutRepository(repoId, userMessageText, controller.signal);
+      const chatRes = await api.chatAboutRepository(repoId, userMessageText, historyPayload, controller.signal);
       
       clearInterval(statusInterval);
-      setMessages(prev => 
-        prev.map(msg => 
+      setMessages(prev => {
+        const next = prev.map(msg => 
           msg.id === assistantMsgId 
-            ? { id: assistantMsgId, sender: 'assistant', response: chatRes }
+            ? { id: assistantMsgId, sender: 'assistant' as const, response: chatRes }
             : msg
-        )
-      );
+        );
+        try {
+          localStorage.setItem(`repochat_history_${repoId}`, JSON.stringify(next));
+        } catch (e) {
+          console.error('Failed to save history to localStorage', e);
+        }
+        return next;
+      });
     } catch (err: unknown) {
       clearInterval(statusInterval);
       let errorMsg = 'Failed to answer query. Connection error.';
@@ -151,13 +198,19 @@ export default function ChatPage({ params }: PageProps) {
         errorMsg = err.message;
       }
       
-      setMessages(prev => 
-        prev.map(msg => 
+      setMessages(prev => {
+        const next = prev.map(msg => 
           msg.id === assistantMsgId 
-            ? { id: assistantMsgId, sender: 'assistant', error: errorMsg }
+            ? { id: assistantMsgId, sender: 'assistant' as const, error: errorMsg }
             : msg
-        )
-      );
+        );
+        try {
+          localStorage.setItem(`repochat_history_${repoId}`, JSON.stringify(next));
+        } catch (e) {
+          console.error('Failed to save history to localStorage', e);
+        }
+        return next;
+      });
     } finally {
       clearInterval(statusInterval);
       setIsProcessing(false);
@@ -221,6 +274,15 @@ export default function ChatPage({ params }: PageProps) {
               <span className="font-semibold">{repo?.file_count}</span>
             </div>
           </div>
+          {messages.length > 0 && (
+            <button
+              onClick={handleClearHistory}
+              className="w-full flex items-center justify-center gap-1.5 mt-4 px-3 py-2 text-xs font-semibold text-red-650 hover:text-white dark:text-red-400 hover:bg-red-600 dark:hover:bg-red-650 border border-red-200 dark:border-red-900/40 rounded-xl transition-all cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Clear Chat History</span>
+            </button>
+          )}
         </div>
 
         <div className="hidden md:block text-[11px] text-gray-400 dark:text-zinc-600 border-t border-gray-200 dark:border-zinc-850 pt-3">

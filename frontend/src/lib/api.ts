@@ -1,7 +1,8 @@
 import {
   RepositoryResponse,
   ChatResponse,
-  ApiError
+  ApiError,
+  HistoryMessage
 } from './types';
 
 export class RepoChatApiError extends Error {
@@ -113,10 +114,10 @@ export const api = {
     });
   },
 
-  async chatAboutRepository(repoId: number, query: string, signal?: AbortSignal): Promise<ChatResponse> {
+  async chatAboutRepository(repoId: number, query: string, history?: HistoryMessage[], signal?: AbortSignal): Promise<ChatResponse> {
     return request<ChatResponse>(`/api/repositories/${repoId}/chat`, {
       method: 'POST',
-      body: JSON.stringify({ query }),
+      body: JSON.stringify({ query, history }),
       signal,
     });
   },

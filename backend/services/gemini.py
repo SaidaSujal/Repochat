@@ -1,6 +1,6 @@
 import time
 import random
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 from backend.config import settings
@@ -183,9 +183,61 @@ Do not write markdown wrapper tags (like ```json) in your JSON output. Just outp
             # Fallback if JSON parsing fails
             return f"Summary generation failed. Error: {str(e)}", f"Failed to parse architecture JSON. Raw output: {raw_response[:500]}"
 
-    def generate_rag_answer(self, query: str, retrieved_chunks: List[Dict[str, Any]]) -> ChatResponse:
+    def generate_standalone_query(self, query: str, history: List[Any]) -> str:
         """
-        Answers a user query based strictly on the retrieved code chunks.
+        Condenses conversation history and the latest user query into a single standalone search query.
+        If history is empty or condensation fails, falls back to the original query.
+        """
+        if not self.api_key:
+            raise GeminiServiceError("GEMINI_API_KEY is not configured in settings.")
+
+        if not history:
+            return query
+
+        # Format history turns for the model
+        history_lines = []
+        for msg in history:
+            role_label = "Assistant" if msg.role == "assistant" else "User"
+            history_lines.append(f"{role_label}: {msg.content}")
+        history_str = "\n".join(history_lines)
+
+        prompt = f"""Given the following conversation history and a follow-up query, rephrase the follow-up query to be a standalone question (i.e. a question that can be understood without the prior conversation).
+Focus on making it a precise, clear search query for search in a codebase index.
+Do NOT include any extra greetings, explanations, introduction, or conversational filler. Output ONLY the standalone question itself.
+
+--- CONVERSATION HISTORY ---
+{history_str}
+----------------------------
+
+--- FOLLOW-UP QUERY ---
+{query}
+-----------------------
+
+Standalone Question:"""
+
+        def _generate():
+            try:
+                model = genai.GenerativeModel(self.generation_model)
+                res = model.generate_content(prompt)
+                return res.text.strip()
+            except Exception:
+                model = genai.GenerativeModel(self.generation_fallback_model)
+                res = model.generate_content(prompt)
+                return res.text.strip()
+
+        try:
+            standalone_query = self._call_with_retry(_generate)
+            if standalone_query:
+                return standalone_query
+            return query
+        except Exception as e:
+            # Safe fallback on query condensation failure
+            print(f"[Gemini Warning] Query condensation failed, falling back to original query: {str(e)}")
+            return query
+
+    def generate_rag_answer(self, query: str, retrieved_chunks: List[Dict[str, Any]], history: Optional[List[Any]] = None) -> ChatResponse:
+        """
+        Answers a user query based strictly on the retrieved code chunks and conversation history.
         Guarantees structured output via Pydantic model schemas.
         """
         if not self.api_key:
@@ -231,6 +283,24 @@ Instructions:
 {query}
 ---------------------
 """
+
+        # Map role assistant -> model for Gemini and ensure strict alternation
+        contents = []
+        if history:
+            for msg in history:
+                role = "model" if msg.role == "assistant" else "user"
+                if contents and contents[-1]["role"] == role:
+                    # Merge consecutive identical roles to prevent API crash
+                    contents[-1]["parts"][0] += f"\n\n{msg.content}"
+                else:
+                    contents.append({"role": role, "parts": [msg.content]})
+
+        # Append latest prompt containing retrieved code snippets
+        if contents and contents[-1]["role"] == "user":
+            contents[-1]["parts"][0] += f"\n\n{prompt}"
+        else:
+            contents.append({"role": "user", "parts": [prompt]})
+
         def _generate():
             # Setup generation config with response schema
             config = genai.GenerationConfig(
@@ -244,7 +314,7 @@ Instructions:
                     model_name=self.generation_model,
                     system_instruction=system_instruction
                 )
-                res = model.generate_content(prompt, generation_config=config)
+                res = model.generate_content(contents, generation_config=config)
                 return res.text
             except Exception as primary_err:
                 # Try fallback model
@@ -252,7 +322,7 @@ Instructions:
                     model_name=self.generation_fallback_model,
                     system_instruction=system_instruction
                 )
-                res = model.generate_content(prompt, generation_config=config)
+                res = model.generate_content(contents, generation_config=config)
                 return res.text
 
         json_text = self._call_with_retry(_generate)
@@ -262,3 +332,4 @@ Instructions:
         except Exception as e:
             # Fallback manual parsing if validation fails
             raise GeminiServiceError(f"Gemini output did not conform to schema: {str(e)}. Raw: {json_text}")
+

@@ -21,9 +21,16 @@ export interface RepositoryResponse {
   expires_at: string;
 }
 
+export interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export interface ChatRequest {
   query: string;
+  history?: HistoryMessage[];
 }
+
 
 export interface CodeSnippet {
   file_path: string;

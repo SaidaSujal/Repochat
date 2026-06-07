@@ -153,7 +153,7 @@ async def test_chat_success_and_metadata_endpoints(monkeypatch):
         follow_up_suggestions=["Can you explain print?"]
     )
     monkeypatch.setattr(GeminiService, "get_embeddings", lambda self, texts: [[0.2] * 768])
-    monkeypatch.setattr(GeminiService, "generate_rag_answer", lambda self, query, chunks: mock_chat_response)
+    monkeypatch.setattr(GeminiService, "generate_rag_answer", lambda self, query, chunks, history=None: mock_chat_response)
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Test 1: Chat Endpoint (/api/repositories/42/chat)
@@ -603,6 +603,129 @@ async def test_startup_recovery(monkeypatch):
 
     # Confirms PENDING repo was re-queued
     assert 201 in requeued_repo_ids
+
+
+@pytest.mark.asyncio
+async def test_chat_history_validation(monkeypatch):
+    # Setup test repo
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(hours=2)
+    test_repo = Repository(
+        id=300,
+        github_url="https://github.com/history/validation",
+        owner="history",
+        name="validation",
+        status="COMPLETED",
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    async with TestSessionLocal() as session:
+        session.add(test_repo)
+        await session.commit()
+
+    # Mock DB retrieval and Gemini response
+    monkeypatch.setattr(VectorDBService, "query_chunks", lambda self, repo_id, query_embedding, top_k=6: [])
+    monkeypatch.setattr(GeminiService, "get_embeddings", lambda self, texts: [[0.1] * 768])
+    mock_response = ChatResponse(
+        short_answer="Valid history test",
+        detailed_explanation="Detail here",
+        code_snippets=[],
+        citations=[],
+        follow_up_suggestions=[]
+    )
+    monkeypatch.setattr(GeminiService, "generate_rag_answer", lambda self, query, chunks, history=None: mock_response)
+    monkeypatch.setattr(GeminiService, "generate_standalone_query", lambda self, query, history: query)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        # 1. Valid history payload (role user/assistant, <=6 messages)
+        res_valid = await ac.post("/api/repositories/300/chat", json={
+            "query": "Is this valid?",
+            "history": [
+                {"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "hi there"}
+            ]
+        })
+        assert res_valid.status_code == 200
+
+        # 2. Invalid role
+        res_invalid_role = await ac.post("/api/repositories/300/chat", json={
+            "query": "Is this valid?",
+            "history": [
+                {"role": "system", "content": "hello"}
+            ]
+        })
+        assert res_invalid_role.status_code == 422
+
+        # 3. Too many messages (> 6)
+        res_too_many = await ac.post("/api/repositories/300/chat", json={
+            "query": "Is this valid?",
+            "history": [
+                {"role": "user", "content": "hello"} for _ in range(7)
+            ]
+        })
+        assert res_too_many.status_code == 422
+
+        # 4. Message too long (> 1000 characters)
+        res_too_long = await ac.post("/api/repositories/300/chat", json={
+            "query": "Is this valid?",
+            "history": [
+                {"role": "user", "content": "a" * 1001}
+            ]
+        })
+        assert res_too_long.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_chat_query_condensation_failure_fallback(monkeypatch):
+    # Setup test repo
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(hours=2)
+    test_repo = Repository(
+        id=301,
+        github_url="https://github.com/history/fallback",
+        owner="history",
+        name="fallback",
+        status="COMPLETED",
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    async with TestSessionLocal() as session:
+        session.add(test_repo)
+        await session.commit()
+
+    monkeypatch.setattr(VectorDBService, "query_chunks", lambda self, repo_id, query_embedding, top_k=6: [])
+    
+    # Mock condensation to raise exception, verifying we fallback gracefully
+    def mock_generate_standalone_query(self, query, history):
+        raise Exception("Gemini service quota exceeded")
+    monkeypatch.setattr(GeminiService, "generate_standalone_query", mock_generate_standalone_query)
+
+    # Embeddings must still run with original query
+    embedded_queries = []
+    def mock_embeddings(self, texts):
+        embedded_queries.extend(texts)
+        return [[0.1] * 768]
+    monkeypatch.setattr(GeminiService, "get_embeddings", mock_embeddings)
+
+    mock_response = ChatResponse(
+        short_answer="Fallback test success",
+        detailed_explanation="Detail",
+        code_snippets=[],
+        citations=[],
+        follow_up_suggestions=[]
+    )
+    monkeypatch.setattr(GeminiService, "generate_rag_answer", lambda self, query, chunks, history=None: mock_response)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        res = await ac.post("/api/repositories/301/chat", json={
+            "query": "Find the entrypoint code",
+            "history": [
+                {"role": "user", "content": "hello"}
+            ]
+        })
+        assert res.status_code == 200
+        assert res.json()["short_answer"] == "Fallback test success"
+        # Verify it fallback to original query
+        assert "Find the entrypoint code" in embedded_queries
+
 
 
 
