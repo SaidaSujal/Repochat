@@ -18,6 +18,14 @@ class IngestionServiceError(Exception):
     pass
 
 class IngestionService:
+    _semaphore = None
+
+    @classmethod
+    def get_semaphore(cls) -> asyncio.Semaphore:
+        if cls._semaphore is None:
+            cls._semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_INGESTIONS)
+        return cls._semaphore
+
     @staticmethod
     async def ingest_repository(github_url: str, db: AsyncSession, background_tasks: BackgroundTasks) -> Repository:
         # 1. Validate if URL is already in SQLite
@@ -77,101 +85,102 @@ class IngestionService:
         """Background worker task executing status-aware ingestion pipeline stages."""
         from backend.database import AsyncSessionLocal
         
-        async with AsyncSessionLocal() as db:
-            # Query the repository record to obtain state
-            stmt = select(Repository).where(Repository.id == repo_id)
-            result = await db.execute(stmt)
-            repo = result.scalar_one_or_none()
-            if not repo:
-                return
+        async with IngestionService.get_semaphore():
+            async with AsyncSessionLocal() as db:
+                # Query the repository record to obtain state
+                stmt = select(Repository).where(Repository.id == repo_id)
+                result = await db.execute(stmt)
+                repo = result.scalar_one_or_none()
+                if not repo:
+                    return
 
-            # Acquire ingestion lock to prevent concurrent runs on same repo url
-            acquired = await GitHubService.acquire_ingestion_lock(repo.github_url)
-            if not acquired:
-                repo.status = "FAILED"
-                repo.error_message = "Ingestion lock already held for this repository."
+                # Acquire ingestion lock to prevent concurrent runs on same repo url
+                acquired = await GitHubService.acquire_ingestion_lock(repo.github_url)
+                if not acquired:
+                    repo.status = "FAILED"
+                    repo.error_message = "Ingestion lock already held for this repository."
+                    await db.commit()
+                    return
+
+                # Transition state to PROCESSING
+                repo.status = "PROCESSING"
                 await db.commit()
-                return
 
-            # Transition state to PROCESSING
-            repo.status = "PROCESSING"
-            await db.commit()
-
-            try:
-                # Clone repo to temp dir
-                temp_dir = tempfile.mkdtemp(prefix="repochat_")
                 try:
-                    # Offload git clone to thread pool
-                    await asyncio.to_thread(GitHubService.clone_repository, repo.github_url, temp_dir)
-                    
-                    # Offload git rev-parse HEAD to thread pool
-                    commit_sha = await asyncio.to_thread(GitHubService.get_commit_sha, temp_dir)
-                    
-                    # Parse files to chunks (offload CPU-bound token counts/regex walks)
-                    parser = ParserService()
-                    chunks = await asyncio.to_thread(parser.parse_repository, temp_dir)
-                    if not chunks:
-                        raise IngestionServiceError("No indexable code files found in the repository.")
-                    
-                    # Extract chunk contents
-                    chunk_contents = [chunk["content"] for chunk in chunks]
-                    gemini = GeminiService()
-                    
-                    # Offload embedding API request and backoff loops to thread pool
-                    embeddings = await asyncio.to_thread(gemini.get_embeddings, chunk_contents)
-                    
-                    if len(embeddings) != len(chunks):
-                        raise IngestionServiceError("Failed to generate embeddings for all code chunks.")
-                    
-                    # Retrieve README content if exists
-                    readme_content = ""
-                    for filename in os.listdir(temp_dir):
-                        if filename.lower().startswith("readme"):
-                            readme_path = os.path.join(temp_dir, filename)
-                            if os.path.isfile(readme_path):
-                                try:
-                                    with open(readme_path, "r", encoding="utf-8", errors="ignore") as f:
-                                        readme_content = f.read()
-                                    break
-                                except Exception:
-                                    pass
-                    
-                    # Extract all file paths
-                    file_paths = list(set([chunk["file_path"] for chunk in chunks]))
-                    
-                    # Generate summary & architecture (Gemini request offloaded to threads)
-                    repo_full_name = f"{repo.owner}/{repo.name}"
-                    summary, arch_overview = await asyncio.to_thread(
-                        gemini.generate_summary_and_architecture,
-                        repo_name=repo_full_name,
-                        file_paths=file_paths,
-                        readme_content=readme_content
-                    )
-                    
-                    # Save intermediate status and metadata
-                    repo.commit_sha = commit_sha
-                    repo.file_count = len(file_paths)
-                    repo.summary = summary
-                    repo.architecture_overview = arch_overview
-                    repo.status = "COMPLETED"
+                    # Clone repo to temp dir
+                    temp_dir = tempfile.mkdtemp(prefix="repochat_")
+                    try:
+                        # Offload git clone to thread pool
+                        await asyncio.to_thread(GitHubService.clone_repository, repo.github_url, temp_dir)
+                        
+                        # Offload git rev-parse HEAD to thread pool
+                        commit_sha = await asyncio.to_thread(GitHubService.get_commit_sha, temp_dir)
+                        
+                        # Parse files to chunks (offload CPU-bound token counts/regex walks)
+                        parser = ParserService()
+                        chunks = await asyncio.to_thread(parser.parse_repository, temp_dir)
+                        if not chunks:
+                            raise IngestionServiceError("No indexable code files found in the repository.")
+                        
+                        # Extract chunk contents
+                        chunk_contents = [chunk["content"] for chunk in chunks]
+                        gemini = GeminiService()
+                        
+                        # Offload embedding API request and backoff loops to thread pool
+                        embeddings = await asyncio.to_thread(gemini.get_embeddings, chunk_contents)
+                        
+                        if len(embeddings) != len(chunks):
+                            raise IngestionServiceError("Failed to generate embeddings for all code chunks.")
+                        
+                        # Retrieve README content if exists
+                        readme_content = ""
+                        for filename in os.listdir(temp_dir):
+                            if filename.lower().startswith("readme"):
+                                readme_path = os.path.join(temp_dir, filename)
+                                if os.path.isfile(readme_path):
+                                    try:
+                                        with open(readme_path, "r", encoding="utf-8", errors="ignore") as f:
+                                            readme_content = f.read()
+                                        break
+                                    except Exception:
+                                        pass
+                        
+                        # Extract all file paths
+                        file_paths = list(set([chunk["file_path"] for chunk in chunks]))
+                        
+                        # Generate summary & architecture (Gemini request offloaded to threads)
+                        repo_full_name = f"{repo.owner}/{repo.name}"
+                        summary, arch_overview = await asyncio.to_thread(
+                            gemini.generate_summary_and_architecture,
+                            repo_name=repo_full_name,
+                            file_paths=file_paths,
+                            readme_content=readme_content
+                        )
+                        
+                        # Save intermediate status and metadata
+                        repo.commit_sha = commit_sha
+                        repo.file_count = len(file_paths)
+                        repo.summary = summary
+                        repo.architecture_overview = arch_overview
+                        repo.status = "COMPLETED"
+                        await db.commit()
+                        
+                        # Add chunks to ChromaDB (offload to thread pool to prevent blocking on database IO locks)
+                        vector_db = VectorDBService()
+                        await asyncio.to_thread(vector_db.add_chunks, repo.id, chunks, embeddings)
+                        
+                        # Save final database state
+                        await db.commit()
+                        
+                    finally:
+                        # Cleanup clone directory (offload disk remove to thread pool)
+                        await asyncio.to_thread(GitHubService.cleanup_directory, temp_dir)
+                except Exception as e:
+                    # Rollback operations and mark state as FAILED
+                    await db.rollback()
+                    repo.status = "FAILED"
+                    repo.error_message = str(e)
                     await db.commit()
-                    
-                    # Add chunks to ChromaDB (offload to thread pool to prevent blocking on database IO locks)
-                    vector_db = VectorDBService()
-                    await asyncio.to_thread(vector_db.add_chunks, repo.id, chunks, embeddings)
-                    
-                    # Save final database state
-                    await db.commit()
-                    
                 finally:
-                    # Cleanup clone directory (offload disk remove to thread pool)
-                    await asyncio.to_thread(GitHubService.cleanup_directory, temp_dir)
-            except Exception as e:
-                # Rollback operations and mark state as FAILED
-                await db.rollback()
-                repo.status = "FAILED"
-                repo.error_message = str(e)
-                await db.commit()
-            finally:
-                # Release ingestion lock
-                await GitHubService.release_ingestion_lock(repo.github_url)
+                    # Release ingestion lock
+                    await GitHubService.release_ingestion_lock(repo.github_url)

@@ -109,18 +109,18 @@ class GitHubService:
         Perform a shallow clone of the repository to target_dir.
         """
         try:
-            # Run git clone in a subprocess with a 60 second timeout limit
+            # Run git clone in a subprocess with the configured timeout limit
             result = subprocess.run(
                 ["git", "clone", "--depth", "1", "--single-branch", github_url, target_dir],
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=60.0
+                timeout=settings.GIT_CLONE_TIMEOUT_SEC
             )
             if result.returncode != 0:
                 raise GitHubServiceError(f"Git clone failed: {result.stderr.strip()}")
         except subprocess.TimeoutExpired:
-            raise GitHubServiceError("Git clone operation timed out after 60 seconds.")
+            raise GitHubServiceError(f"Git clone operation timed out after {settings.GIT_CLONE_TIMEOUT_SEC} seconds.")
         except FileNotFoundError:
             raise GitHubServiceError("git command line tool is not installed on the system.")
         except Exception as e:
@@ -139,7 +139,7 @@ class GitHubService:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=10.0
+                timeout=settings.GIT_COMMAND_TIMEOUT_SEC
             )
             sha = result.stdout.strip()
             import re

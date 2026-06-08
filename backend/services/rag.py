@@ -7,6 +7,7 @@ from backend.models import Repository
 from backend.services.gemini import GeminiService
 from backend.services.vector_db import VectorDBService
 from backend.schemas import ChatResponse, HistoryMessage
+from backend.utils.history_normalization import normalize_history
 
 class RAGServiceError(Exception):
     pass
@@ -16,7 +17,7 @@ class RAGService:
         self.gemini_service = GeminiService()
         self.vector_db_service = VectorDBService()
 
-    async def answer_query(self, repo_id: int, query: str, db: AsyncSession, history: Optional[List[HistoryMessage]] = None) -> ChatResponse:
+    async def answer_query(self, repo_id: int, query: str, db: AsyncSession, history: Optional[List[Any]] = None) -> ChatResponse:
         # Check if repository exists and is not expired
         stmt = select(Repository).where(Repository.id == repo_id)
         result = await db.execute(stmt)
@@ -27,7 +28,7 @@ class RAGService:
             raise RAGServiceError("Repository cache has expired. Please re-ingest the repository.")
 
         # 1. Query Condensation: Generate standalone query using Gemini
-        hist_list = history or []
+        hist_list = normalize_history(history)
         try:
             standalone_query = await asyncio.to_thread(
                 self.gemini_service.generate_standalone_query,

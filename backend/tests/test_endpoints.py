@@ -646,32 +646,32 @@ async def test_chat_history_validation(monkeypatch):
         })
         assert res_valid.status_code == 200
 
-        # 2. Invalid role
+        # 2. Invalid role - dropped defensively, returns 200
         res_invalid_role = await ac.post("/api/repositories/300/chat", json={
             "query": "Is this valid?",
             "history": [
                 {"role": "system", "content": "hello"}
             ]
         })
-        assert res_invalid_role.status_code == 422
+        assert res_invalid_role.status_code == 200
 
-        # 3. Too many messages (> 6)
+        # 3. Too many messages (> 6) - limited/pruned to 6 messages, returns 200
         res_too_many = await ac.post("/api/repositories/300/chat", json={
             "query": "Is this valid?",
             "history": [
                 {"role": "user", "content": "hello"} for _ in range(7)
             ]
         })
-        assert res_too_many.status_code == 422
+        assert res_too_many.status_code == 200
 
-        # 4. Message too long (> 1000 characters)
+        # 4. Message too long (> 1000 characters) - trimmed dynamically to 1000 chars, returns 200
         res_too_long = await ac.post("/api/repositories/300/chat", json={
             "query": "Is this valid?",
             "history": [
                 {"role": "user", "content": "a" * 1001}
             ]
         })
-        assert res_too_long.status_code == 422
+        assert res_too_long.status_code == 200
 
 
 @pytest.mark.asyncio
@@ -725,6 +725,94 @@ async def test_chat_query_condensation_failure_fallback(monkeypatch):
         assert res.json()["short_answer"] == "Fallback test success"
         # Verify it fallback to original query
         assert "Find the entrypoint code" in embedded_queries
+
+
+@pytest.mark.asyncio
+async def test_gemini_receives_only_normalized_history(monkeypatch):
+    # Setup test repo
+    now_utc = datetime.now(timezone.utc)
+    expires_at = now_utc + timedelta(hours=2)
+    test_repo = Repository(
+        id=400,
+        github_url="https://github.com/history/gemini-normalization",
+        owner="history",
+        name="gemini-normalization",
+        status="COMPLETED",
+        expires_at=expires_at.replace(tzinfo=None)
+    )
+    async with TestSessionLocal() as session:
+        session.add(test_repo)
+        await session.commit()
+
+    # Track arguments received by GeminiService
+    received_standalone_histories = []
+    received_rag_histories = []
+
+    def mock_generate_standalone_query(self, query, history):
+        received_standalone_histories.append(history)
+        return query
+
+    def mock_generate_rag_answer(self, query, chunks, history=None):
+        received_rag_histories.append(history)
+        return ChatResponse(
+            short_answer="Intercepted",
+            detailed_explanation="Intercepted details",
+            code_snippets=[],
+            citations=[],
+            follow_up_suggestions=[]
+        )
+
+    monkeypatch.setattr(VectorDBService, "query_chunks", lambda self, repo_id, query_embedding, top_k=6: [])
+    monkeypatch.setattr(GeminiService, "get_embeddings", lambda self, texts: [[0.1] * 768])
+    monkeypatch.setattr(GeminiService, "generate_standalone_query", mock_generate_standalone_query)
+    monkeypatch.setattr(GeminiService, "generate_rag_answer", mock_generate_rag_answer)
+
+    # We send a heavily corrupted history to the chat endpoint
+    corrupted_history = [
+        {"role": "user", "content": "a" * 1500},     # Needs content trimming to 1000
+        {"role": "system", "content": "ignored"},    # Needs role exclusion
+        {"role": 123, "content": "ignored"},         # Needs non-str role exclusion
+        {"role": "assistant", "content": 456},       # Needs non-str content exclusion
+        [{"role": "user", "content": "list"}],       # Needs nested list exclusion
+        {"role": "assistant", "content": "valid 1"}, # Valid message
+        {"role": "user", "content": "valid 2"},      # Valid message
+        {"role": "assistant", "content": "valid 3"}, # Valid message
+        {"role": "user", "content": "valid 4"},      # Valid message
+        {"role": "assistant", "content": "valid 5"}, # Valid message
+        {"role": "user", "content": "valid 6"},      # Valid message
+        {"role": "assistant", "content": "valid 7"}  # Valid message, makes total valid > 6
+    ]
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        res = await ac.post("/api/repositories/400/chat", json={
+            "query": "Who goes there?",
+            "history": corrupted_history
+        })
+        assert res.status_code == 200
+
+    # Let's inspect what history actually reached GeminiService
+    assert len(received_standalone_histories) == 1
+    assert len(received_rag_histories) == 1
+
+    for history_list in (received_standalone_histories[0], received_rag_histories[0]):
+        # Must be normalized: max 6 messages, valid roles, proper types
+        assert history_list is not None
+        assert isinstance(history_list, list)
+        assert len(history_list) <= 6
+        for msg in history_list:
+            from backend.schemas import HistoryMessage
+            assert isinstance(msg, HistoryMessage)
+            assert msg.role in ("user", "assistant")
+            assert isinstance(msg.content, str)
+            assert len(msg.content) <= 1000
+            assert msg.content.strip() != ""
+            
+        # Verify specific normalization content:
+        # Since we have 7 valid messages at the end (valid 1 to 7) + 1 trimmed message at the start,
+        # and the limit is 6, it keeps only the last 6 valid messages (valid 2 to 7).
+        assert len(history_list) == 6
+        assert history_list[0].content == "valid 2"
+        assert history_list[5].content == "valid 7"
 
 
 

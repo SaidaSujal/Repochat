@@ -15,11 +15,11 @@ class GeminiService:
         if self.api_key:
             genai.configure(api_key=self.api_key)
             
-        # Model names
-        self.embedding_model = "models/gemini-embedding-001"
-        self.embedding_fallback_model = "models/gemini-embedding-2"
-        self.generation_model = "gemini-3.5-flash"
-        self.generation_fallback_model = "gemini-2.5-flash"
+        # Model names loaded from centralized settings
+        self.embedding_model = settings.GEMINI_EMBEDDING_MODEL
+        self.embedding_fallback_model = settings.GEMINI_EMBEDDING_FALLBACK_MODEL
+        self.generation_model = settings.GEMINI_GENERATION_MODEL
+        self.generation_fallback_model = settings.GEMINI_GENERATION_FALLBACK_MODEL
 
     def _call_with_retry(self, func, *args, max_retries: int = 10, initial_backoff: float = 2.0, **kwargs):
         """Execute a function with exponential backoff and jitter to survive rate limits."""

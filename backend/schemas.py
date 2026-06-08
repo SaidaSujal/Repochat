@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel, Field, HttpUrl, field_validator
 import re
 
@@ -66,20 +66,13 @@ class HistoryMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000, description="The user question about the codebase")
-    history: Optional[List[HistoryMessage]] = Field(default=[], description="Prior messages in this chat session")
+    history: Optional[List[Any]] = Field(default=[], description="Prior messages in this chat session")
 
     @field_validator("query")
     @classmethod
     def validate_query(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("Query must not be empty or whitespace-only")
-        return value
-
-    @field_validator("history")
-    @classmethod
-    def validate_history(cls, value: Optional[List[HistoryMessage]]) -> Optional[List[HistoryMessage]]:
-        if value is not None and len(value) > 6:
-            raise ValueError("History cannot exceed 6 messages")
         return value
 
 
