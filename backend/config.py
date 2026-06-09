@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     GEMINI_EMBEDDING_FALLBACK_MODEL: str = "models/gemini-embedding-2"
     GEMINI_GENERATION_MODEL: str = "gemini-3.5-flash"
     GEMINI_GENERATION_FALLBACK_MODEL: str = "gemini-2.5-flash"
+    
+    # Gemini API Call and Retry Config
+    GEMINI_TIMEOUT_SEC: float = 30.0
+    GEMINI_MAX_RETRIES: int = 4
 
     @field_validator(
         "GEMINI_EMBEDDING_MODEL",
@@ -24,6 +28,20 @@ class Settings(BaseSettings):
     def validate_model_name(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("Model name cannot be empty or whitespace-only")
+        return value
+
+    @field_validator("GEMINI_TIMEOUT_SEC")
+    @classmethod
+    def validate_positive_timeout_gemini(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("Gemini timeout must be a positive number of seconds.")
+        return value
+
+    @field_validator("GEMINI_MAX_RETRIES")
+    @classmethod
+    def validate_non_negative_retries(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("Max retries value must be a non-negative integer.")
         return value
 
     # Git Configuration

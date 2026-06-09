@@ -20,9 +20,13 @@ class GeminiService:
         self.embedding_fallback_model = settings.GEMINI_EMBEDDING_FALLBACK_MODEL
         self.generation_model = settings.GEMINI_GENERATION_MODEL
         self.generation_fallback_model = settings.GEMINI_GENERATION_FALLBACK_MODEL
+        self.timeout = settings.GEMINI_TIMEOUT_SEC
+        self.max_retries = settings.GEMINI_MAX_RETRIES
 
-    def _call_with_retry(self, func, *args, max_retries: int = 10, initial_backoff: float = 2.0, **kwargs):
+    def _call_with_retry(self, func, *args, max_retries: Optional[int] = None, initial_backoff: float = 2.0, **kwargs):
         """Execute a function with exponential backoff and jitter to survive rate limits."""
+        if max_retries is None:
+            max_retries = self.max_retries
         backoff = initial_backoff
         last_exception = None
         import re
@@ -60,12 +64,14 @@ class GeminiService:
                 match = re.search(r"seconds:\s*(\d+)", err_str)
                 if match:
                     sleep_time = float(match.group(1)) + 1.0
+                    sleep_time = min(sleep_time, 30.0) # Cap maximum sleep backoff
                     print(f"[Gemini Quota] Rate limit hit. Server requested retry delay: {sleep_time}s. Sleeping... (Attempt {attempt+1}/{max_retries})")
                 else:
                     # Exponential sleep with jitter, but if it is a rate limit, sleep at least 5s
                     sleep_time = backoff + random.uniform(0, 1.0)
                     if is_rate_limit:
                         sleep_time = max(sleep_time, 5.0)
+                    sleep_time = min(sleep_time, 30.0) # Cap maximum sleep backoff
                     print(f"[Gemini Rate Limit] Retrying in {sleep_time:.2f}s... (Attempt {attempt+1}/{max_retries})")
                 
                 time.sleep(sleep_time)
@@ -96,7 +102,8 @@ class GeminiService:
                     res = genai.embed_content(
                         model=self.embedding_model,
                         content=batch,
-                        task_type="RETRIEVAL_DOCUMENT"
+                        task_type="RETRIEVAL_DOCUMENT",
+                        request_options=RequestOptions(timeout=self.timeout)
                     )
                     return [item for item in res["embedding"]]
                 except Exception as primary_error:
@@ -105,7 +112,8 @@ class GeminiService:
                         res = genai.embed_content(
                             model=self.embedding_fallback_model,
                             content=batch,
-                            task_type="RETRIEVAL_DOCUMENT"
+                            task_type="RETRIEVAL_DOCUMENT",
+                            request_options=RequestOptions(timeout=self.timeout)
                         )
                         return [item for item in res["embedding"]]
                     except Exception as fallback_error:
@@ -161,7 +169,8 @@ Do not write markdown wrapper tags (like ```json) in your JSON output. Just outp
                 model = genai.GenerativeModel(self.generation_model)
                 res = model.generate_content(
                     prompt,
-                    generation_config=genai.GenerationConfig(response_mime_type="application/json")
+                    generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+                    request_options=RequestOptions(timeout=self.timeout)
                 )
                 return res.text
             except Exception as primary_err:
@@ -169,7 +178,8 @@ Do not write markdown wrapper tags (like ```json) in your JSON output. Just outp
                 model = genai.GenerativeModel(self.generation_fallback_model)
                 res = model.generate_content(
                     prompt,
-                    generation_config=genai.GenerationConfig(response_mime_type="application/json")
+                    generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+                    request_options=RequestOptions(timeout=self.timeout)
                 )
                 return res.text
 
@@ -218,11 +228,11 @@ Standalone Question:"""
         def _generate():
             try:
                 model = genai.GenerativeModel(self.generation_model)
-                res = model.generate_content(prompt)
+                res = model.generate_content(prompt, request_options=RequestOptions(timeout=self.timeout))
                 return res.text.strip()
             except Exception:
                 model = genai.GenerativeModel(self.generation_fallback_model)
-                res = model.generate_content(prompt)
+                res = model.generate_content(prompt, request_options=RequestOptions(timeout=self.timeout))
                 return res.text.strip()
 
         try:
@@ -314,7 +324,7 @@ Instructions:
                     model_name=self.generation_model,
                     system_instruction=system_instruction
                 )
-                res = model.generate_content(contents, generation_config=config)
+                res = model.generate_content(contents, generation_config=config, request_options=RequestOptions(timeout=self.timeout))
                 return res.text
             except Exception as primary_err:
                 # Try fallback model
@@ -322,7 +332,7 @@ Instructions:
                     model_name=self.generation_fallback_model,
                     system_instruction=system_instruction
                 )
-                res = model.generate_content(contents, generation_config=config)
+                res = model.generate_content(contents, generation_config=config, request_options=RequestOptions(timeout=self.timeout))
                 return res.text
 
         json_text = self._call_with_retry(_generate)
