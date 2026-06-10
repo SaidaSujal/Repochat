@@ -44,6 +44,7 @@ async def setup_integration_db(monkeypatch):
     monkeypatch.setattr(backend.main, "AsyncSessionLocal", TestSessionLocal)
     
     # Set FastAPI dependency override locally for the scope of this test module
+    original_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = override_get_db
     
     # Reset semaphores and limiters
@@ -52,10 +53,13 @@ async def setup_integration_db(monkeypatch):
     
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await test_engine.dispose()
+    try:
+        yield
+    finally:
+        app.dependency_overrides = original_overrides
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await test_engine.dispose()
 
 
 @pytest.mark.asyncio

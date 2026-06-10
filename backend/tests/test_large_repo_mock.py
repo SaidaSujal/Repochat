@@ -41,16 +41,20 @@ async def setup_large_db(monkeypatch):
     monkeypatch.setattr(backend.database, "AsyncSessionLocal", TestSessionLocal)
     monkeypatch.setattr(backend.main, "AsyncSessionLocal", TestSessionLocal)
     
+    original_overrides = app.dependency_overrides.copy()
     app.dependency_overrides[get_db] = override_get_db
     app.state.limiter.enabled = False
     IngestionService._semaphore = None
     
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await test_engine.dispose()
+    try:
+        yield
+    finally:
+        app.dependency_overrides = original_overrides
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await test_engine.dispose()
 
 @pytest.mark.asyncio
 async def test_large_repository_ingestion_scale_limits(monkeypatch):
