@@ -88,7 +88,7 @@ class Citation(BaseModel):
 
 class ChatResponse(BaseModel):
     short_answer: str = Field(..., description="A direct, concise answer to the question")
-    detailed_explanation: str = Field(..., description="A detailed explanation answering the query")
-    code_snippets: List[CodeSnippet] = Field(..., description="Code snippets referenced in the answer")
-    citations: List[Citation] = Field(..., description="Source files and line number citations")
-    follow_up_suggestions: List[str] = Field(..., description="Suggested follow-up questions")
+    detailed_explanation: str = Field(default="", description="A detailed explanation answering the query")
+    code_snippets: List[CodeSnippet] = Field(default_factory=list, description="Code snippets referenced in the answer")
+    citations: List[Citation] = Field(default_factory=list, description="Source files and line number citations")
+    follow_up_suggestions: List[str] = Field(default_factory=list, description="Suggested follow-up questions")

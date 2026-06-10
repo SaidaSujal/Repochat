@@ -245,6 +245,115 @@ Standalone Question:"""
             print(f"[Gemini Warning] Query condensation failed, falling back to original query: {str(e)}")
             return query
 
+    def _normalize_response_json(self, json_text: str) -> Dict[str, Any]:
+        """
+        Parses raw response JSON and safely normalizes optional/malformed fields
+        before passing it to validation, preserving frontend API compatibility.
+        """
+        import json
+        
+        # Clean markdown blocks from string if present
+        cleaned_json = json_text.strip()
+        if cleaned_json.startswith("```json"):
+            cleaned_json = cleaned_json[7:]
+        elif cleaned_json.startswith("```"):
+            cleaned_json = cleaned_json[3:]
+        if cleaned_json.endswith("```"):
+            cleaned_json = cleaned_json[:-3]
+        cleaned_json = cleaned_json.strip()
+        
+        try:
+            parsed = json.loads(cleaned_json)
+        except Exception as e:
+            raise GeminiServiceError(f"Gemini output was invalid JSON: {str(e)}") from e
+            
+        if not isinstance(parsed, dict):
+            raise GeminiServiceError(f"Gemini output did not parse as a JSON object: {type(parsed).__name__}")
+            
+        # Extract and sanitize string fields
+        short_answer_val = parsed.get("short_answer")
+        if short_answer_val is None:
+            short_answer = ""
+        else:
+            short_answer = str(short_answer_val).strip()
+            
+        detailed_explanation_val = parsed.get("detailed_explanation")
+        if detailed_explanation_val is None:
+            detailed_explanation = ""
+        else:
+            detailed_explanation = str(detailed_explanation_val).strip()
+            
+        # Fallback if short_answer is missing/empty but detailed_explanation exists
+        if not short_answer and detailed_explanation:
+            short_answer = detailed_explanation[:120] + "..."
+        elif not short_answer:
+            short_answer = "Response generated successfully."
+
+        normalized = {
+            "short_answer": short_answer,
+            "detailed_explanation": detailed_explanation
+        }
+
+        # code_snippets must always be a list of dicts matching CodeSnippet schema
+        snippets = parsed.get("code_snippets")
+        normalized_snippets = []
+        if isinstance(snippets, list):
+            for snip in snippets:
+                if isinstance(snip, dict):
+                    file_path = snip.get("file_path")
+                    code_content = snip.get("code_content")
+                    if file_path is not None and code_content is not None:
+                        lines = snip.get("lines")
+                        if lines is None:
+                            lines = "1-1"
+                        normalized_snippets.append({
+                            "file_path": str(file_path),
+                            "lines": str(lines),
+                            "code_content": str(code_content)
+                        })
+        normalized["code_snippets"] = normalized_snippets
+
+        # citations must always be a list of dicts matching Citation schema
+        citations = parsed.get("citations")
+        normalized_citations = []
+        if isinstance(citations, list):
+            for cit in citations:
+                if isinstance(cit, dict):
+                    file_path = cit.get("file_path")
+                    if file_path is not None:
+                        start_line = cit.get("start_line")
+                        end_line = cit.get("end_line")
+                        
+                        try:
+                            start_line = int(start_line) if start_line is not None else 1
+                        except (ValueError, TypeError):
+                            start_line = 1
+                            
+                        try:
+                            end_line = int(end_line) if end_line is not None else 1
+                        except (ValueError, TypeError):
+                            end_line = 1
+                            
+                        normalized_citations.append({
+                            "file_path": str(file_path),
+                            "start_line": start_line,
+                            "end_line": end_line
+                        })
+        normalized["citations"] = normalized_citations
+
+        # follow_up_suggestions must always be a list of strings
+        suggestions = parsed.get("follow_up_suggestions")
+        normalized_suggestions = []
+        if isinstance(suggestions, list):
+            for sug in suggestions:
+                if sug is not None:
+                    sug_str = str(sug).strip()
+                    if sug_str:
+                        normalized_suggestions.append(sug_str)
+        normalized["follow_up_suggestions"] = normalized_suggestions
+
+        return normalized
+
     def generate_rag_answer(self, query: str, retrieved_chunks: List[Dict[str, Any]], history: Optional[List[Any]] = None) -> ChatResponse:
         """
         Answers a user query based strictly on the retrieved code chunks and conversation history.
@@ -337,9 +446,10 @@ Instructions:
 
         json_text = self._call_with_retry(_generate)
         
+        # Normalize and validate
+        normalized_dict = self._normalize_response_json(json_text)
         try:
-            return ChatResponse.model_validate_json(json_text)
+            return ChatResponse.model_validate(normalized_dict)
         except Exception as e:
-            # Fallback manual parsing if validation fails
             raise GeminiServiceError(f"Gemini output did not conform to schema: {str(e)}. Raw: {json_text}")
 
