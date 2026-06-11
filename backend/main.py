@@ -275,3 +275,12 @@ async def get_repository_metadata(
 ):
     repo = await get_active_repository(repo_id, db)
     return repo
+
+@app.get(
+    "/api/health",
+    status_code=status.HTTP_200_OK,
+    summary="Health check endpoint",
+    description="Returns the status of the server."
+)
+async def health_check():
+    return {"status": "healthy"}

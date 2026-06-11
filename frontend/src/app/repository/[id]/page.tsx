@@ -28,6 +28,29 @@ interface PageProps {
   };
 }
 
+function getFriendlyIngestionErrorMessage(rawError?: string | null): string {
+  if (!rawError) {
+    return 'No specific details provided by the indexing worker.';
+  }
+  const lower = rawError.toLowerCase();
+  if (lower.includes('quota') || lower.includes('limit') || lower.includes('exhausted') || lower.includes('429')) {
+    return 'The public Gemini API rate limit or quota has been reached. Please try again in a few minutes, or run RepoChat locally using your own API key.';
+  }
+  if (lower.includes('lock already held')) {
+    return 'This repository is currently being indexed by another worker. Please wait for that process to complete.';
+  }
+  if (lower.includes('clone') || lower.includes('git') || lower.includes('exit code 128')) {
+    return 'Failed to clone repository. Please verify that the repository is public and the URL is correct.';
+  }
+  if (lower.includes('no indexable code files')) {
+    return 'No supported source files (such as .py, .js, .ts, .go) were found in the repository.';
+  }
+  if (lower.includes('timeout') || lower.includes('aborted')) {
+    return 'The indexing operation timed out. The repository might be too large for the public server resources.';
+  }
+  return 'An unexpected error occurred during the indexing pipeline. Please verify the repository and retry.';
+}
+
 export default function RepositoryDashboard({ params }: PageProps) {
   const router = useRouter();
   const repoId = parseInt(params.id, 10);
@@ -278,12 +301,23 @@ export default function RepositoryDashboard({ params }: PageProps) {
         <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-8 shadow-sm flex-1 flex flex-col justify-center items-center text-center max-w-xl mx-auto w-full my-8">
           <AlertCircle className="h-16 w-16 text-red-600 dark:text-red-500 mb-4 animate-bounce" />
           <h3 className="text-lg font-bold text-gray-850 dark:text-zinc-150">Ingestion Pipeline Failed</h3>
-          <p className="text-sm text-gray-500 dark:text-zinc-400 mt-2 leading-relaxed">
-            An error occurred while attempting to clone, parse, or compute embeddings for this repository.
+          <p className="text-sm text-gray-600 dark:text-zinc-400 mt-2 leading-relaxed">
+            {getFriendlyIngestionErrorMessage(repo.error_message)}
           </p>
-          <div className="w-full mt-4 p-4 bg-red-50 dark:bg-red-950/15 border border-red-200 dark:border-red-900/30 rounded-xl text-left font-mono text-xs text-red-750 dark:text-red-400 max-h-48 overflow-y-auto break-all">
-            <strong>Error details:</strong>
-            <p className="mt-1 whitespace-pre-wrap">{repo.error_message || 'No specific error message provided by background process.'}</p>
+          <div className="w-full mt-4 text-left">
+            <details className="group bg-red-50/50 dark:bg-red-950/10 border border-red-200/50 dark:border-red-900/20 rounded-xl overflow-hidden">
+              <summary className="flex items-center justify-between p-3 text-xs font-semibold text-red-800 dark:text-red-400 cursor-pointer hover:bg-red-100/30 dark:hover:bg-red-950/20 select-none">
+                <span>View technical details for developers</span>
+                <span className="transition-transform group-open:rotate-180">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </span>
+              </summary>
+              <div className="p-4 border-t border-red-200/40 dark:border-red-900/10 bg-white/50 dark:bg-zinc-950/20 font-mono text-xs text-gray-600 dark:text-zinc-400 max-h-48 overflow-y-auto break-all whitespace-pre-wrap">
+                {repo.error_message || 'No raw traceback logs available.'}
+              </div>
+            </details>
           </div>
           <div className="mt-6 w-full space-y-3">
             {isReingesting ? (

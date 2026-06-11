@@ -38,6 +38,7 @@ export default function LandingPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [recentRepos, setRecentRepos] = useState<RepositoryResponse[]>([]);
+  const [isBackendHealthy, setIsBackendHealthy] = useState<boolean | null>(null);
   
   // Progress states
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
@@ -62,6 +63,34 @@ export default function LandingPage() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+    };
+  }, []);
+
+  // Health check loop for cold start detection
+  useEffect(() => {
+    let active = true;
+    let timer: NodeJS.Timeout;
+    
+    const check = async () => {
+      try {
+        const res = await api.checkHealth();
+        if (res && res.status === 'healthy' && active) {
+          setIsBackendHealthy(true);
+        }
+      } catch (err) {
+        if (active) {
+          setIsBackendHealthy(false);
+          // Retry health check every 4 seconds until it is online
+          timer = setTimeout(check, 4000);
+        }
+      }
+    };
+    
+    check();
+    
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
     };
   }, []);
 
@@ -192,6 +221,17 @@ export default function LandingPage() {
         {!loading ? (
           <>
             <form onSubmit={handleIngest} className="space-y-4">
+            {isBackendHealthy === false && (
+              <div className="flex items-start gap-3 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/10 p-4 rounded-xl border border-amber-200 dark:border-amber-900/30 mb-4 animate-pulse">
+                <Clock className="h-5 w-5 shrink-0 mt-0.5 text-amber-600 dark:text-amber-500 animate-spin" />
+                <div className="space-y-1">
+                  <p className="font-semibold">Connecting to indexing service...</p>
+                  <p className="text-xs text-amber-600 dark:text-zinc-400 leading-relaxed font-sans">
+                    Note: Free-tier servers automatically spin down after inactivity. On first load, it may take up to 60 seconds to boot up. Thank you for your patience!
+                  </p>
+                </div>
+              </div>
+            )}
             <div>
               <label htmlFor="repo-url" className="block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-2">
                 GitHub Repository URL
@@ -210,7 +250,7 @@ export default function LandingPage() {
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="https://github.com/facebook/react"
                   className="block w-full pl-10 pr-4 py-3 bg-gray-50 dark:bg-zinc-950 border border-gray-300 dark:border-zinc-800 rounded-xl text-gray-900 dark:text-zinc-100 placeholder-gray-400 dark:placeholder-zinc-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all sm:text-sm"
-                  disabled={loading}
+                  disabled={loading || isBackendHealthy === false}
                 />
               </div>
             </div>
@@ -224,9 +264,10 @@ export default function LandingPage() {
 
             <button
               type="submit"
-              className="w-full flex items-center justify-center gap-2 px-5 py-3 text-base font-semibold text-white bg-blue-600 dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-700 rounded-xl transition-all shadow-md active:scale-95"
+              disabled={loading || isBackendHealthy === false}
+              className="w-full flex items-center justify-center gap-2 px-5 py-3 text-base font-semibold text-white bg-blue-600 dark:bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-700 rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <span>Analyze & Index Codebase</span>
+              <span>{isBackendHealthy === false ? "Connecting to server..." : "Analyze & Index Codebase"}</span>
               <ArrowRight className="h-5 w-5" />
             </button>
           </form>

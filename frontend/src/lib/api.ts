@@ -29,10 +29,14 @@ export function mapApiError(status: number, data: ApiError): string {
       : 'The repository cache has expired. Please re-ingest the repository.';
   }
   if (status === 429) {
-    const rateMsg = typeof data.detail === 'string' 
+    const rawMsg = typeof data.detail === 'string' 
       ? data.detail 
-      : (data.error || 'Too many requests. Please try again later.');
-    return `Rate limit exceeded: ${rateMsg}`;
+      : (data.error || '');
+    const lower = rawMsg.toLowerCase();
+    if (lower.includes('quota') || lower.includes('limit') || lower.includes('exhausted') || lower.includes('rate')) {
+      return 'The public Gemini API key quota has been temporarily exhausted due to high traffic. Please retry in a few moments, or run RepoChat locally to use your own API key.';
+    }
+    return 'Too many requests. You have exceeded the hourly question limit (60 questions/hour). Please try again later or run RepoChat locally.';
   }
   if (status === 422) {
     if (Array.isArray(data.detail)) {
@@ -41,7 +45,12 @@ export function mapApiError(status: number, data: ApiError): string {
     return typeof data.detail === 'string' ? data.detail : 'Invalid request parameters.';
   }
   if (status === 500) {
-    return typeof data.detail === 'string' ? data.detail : 'Internal server error occurred on the backend.';
+    const rawMsg = typeof data.detail === 'string' ? data.detail : '';
+    const lower = rawMsg.toLowerCase();
+    if (lower.includes('quota') || lower.includes('limit') || lower.includes('exhausted') || lower.includes('rate')) {
+      return 'The public Gemini API key quota has been temporarily exhausted due to high traffic. Please retry in a few moments, or run RepoChat locally to use your own API key.';
+    }
+    return 'An unexpected server error occurred on the backend. Please check your inputs or try again later.';
   }
   return typeof data.detail === 'string' 
     ? data.detail 
@@ -85,6 +94,13 @@ async function request<T>(
 }
 
 export const api = {
+  async checkHealth(signal?: AbortSignal): Promise<{ status: string }> {
+    return request<{ status: string }>('/api/health', {
+      method: 'GET',
+      signal,
+    });
+  },
+
   async ingestRepository(githubUrl: string, signal?: AbortSignal): Promise<RepositoryResponse> {
     return request<RepositoryResponse>('/api/ingest', {
       method: 'POST',
