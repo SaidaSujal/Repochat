@@ -190,7 +190,8 @@ export default function LandingPage() {
       {/* Main Form Box */}
       <div className="bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl p-6 md:p-8 shadow-xl">
         {!loading ? (
-          <form onSubmit={handleIngest} className="space-y-4">
+          <>
+            <form onSubmit={handleIngest} className="space-y-4">
             <div>
               <label htmlFor="repo-url" className="block text-sm font-medium text-gray-700 dark:text-zinc-300 mb-2">
                 GitHub Repository URL
@@ -229,6 +230,23 @@ export default function LandingPage() {
               <ArrowRight className="h-5 w-5" />
             </button>
           </form>
+          
+          {/* Free-Tier Environment Notice */}
+          <div className="mt-6 p-4 rounded-xl bg-blue-50/30 dark:bg-zinc-950/40 border border-blue-100/50 dark:border-zinc-800/80 text-xs text-gray-600 dark:text-zinc-400 space-y-2">
+            <div className="flex items-center gap-2 font-semibold text-blue-900 dark:text-blue-300">
+              <Cpu className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <span>Demo Environment Information</span>
+            </div>
+            <p className="leading-relaxed">
+              This public demo deployment utilizes the <strong>Gemini Free Tier API</strong>. To ensure optimal performance and avoid API rate limits:
+            </p>
+            <ul className="list-disc pl-4 space-y-1">
+              <li>We recommend testing with small-to-medium repositories (e.g., &lt; 500 files, &lt; 50MB).</li>
+              <li>Free-tier API quotas may occasionally become exhausted during periods of high public traffic.</li>
+              <li>For heavier indexing and testing, consider running RepoChat locally with your own API key.</li>
+            </ul>
+          </div>
+          </>
         ) : (
           /* Progressive Ingestion Display */
           <div className="space-y-6">

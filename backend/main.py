@@ -107,10 +107,11 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-# Configure CORS Middleware
+# Configure CORS Middleware (split FRONTEND_URL by comma to support multiple origins)
+origins = [origin.strip() for origin in settings.FRONTEND_URL.split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_URL],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
