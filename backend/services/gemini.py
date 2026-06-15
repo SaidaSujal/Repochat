@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Tuple, Optional
 import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 from backend.config import settings
-from backend.schemas import ChatResponse, CodeSnippet, Citation
+from backend.schemas import ChatResponse, CodeSnippet, Citation, GeminiChatResponse
 
 class GeminiServiceError(Exception):
     pass
@@ -421,10 +421,10 @@ Instructions:
             contents.append({"role": "user", "parts": [prompt]})
 
         def _generate():
-            # Setup generation config with response schema
+            # Setup generation config with response schema (use GeminiChatResponse to avoid "default" fields rejection)
             config = genai.GenerationConfig(
                 response_mime_type="application/json",
-                response_schema=ChatResponse
+                response_schema=GeminiChatResponse
             )
             
             try:

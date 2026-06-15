@@ -156,3 +156,26 @@ def test_normalize_invalid_unparseable_json():
         service._normalize_response_json(raw_json)
         
     assert "invalid JSON" in str(exc_info.value)
+
+def test_gemini_schema_has_no_defaults():
+    """Verify that GeminiChatResponse JSON schema does not contain any 'default' keys."""
+    from backend.schemas import GeminiChatResponse
+    schema = GeminiChatResponse.model_json_schema()
+    
+    # Verify top-level has no default
+    assert "default" not in schema
+    
+    # Verify properties have no default keys
+    properties = schema.get("properties", {})
+    for field_name, prop in properties.items():
+        assert "default" not in prop, f"Field '{field_name}' should not contain a default value in GeminiChatResponse schema"
+
+def test_chat_response_retains_resilient_defaults():
+    """Verify that ChatResponse still retains default values at runtime for API compatibility and resilience."""
+    from backend.schemas import ChatResponse
+    res = ChatResponse.model_validate({"short_answer": "Only short answer"})
+    assert res.short_answer == "Only short answer"
+    assert res.detailed_explanation == ""
+    assert res.code_snippets == []
+    assert res.citations == []
+    assert res.follow_up_suggestions == []
