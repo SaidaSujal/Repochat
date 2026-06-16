@@ -4,7 +4,13 @@ from typing import List, Dict, Any, Tuple, Optional
 import google.generativeai as genai
 from google.generativeai.types import RequestOptions
 from backend.config import settings
-from backend.schemas import ChatResponse, CodeSnippet, Citation, GeminiChatResponse
+from backend.schemas import (
+    ChatResponse,
+    CodeSnippet,
+    Citation,
+    GeminiChatResponse,
+    RepositorySummaryResponse
+)
 
 class GeminiServiceError(Exception):
     pass
@@ -164,12 +170,16 @@ Format your answer as a raw JSON object matching the following structure:
 Do not write markdown wrapper tags (like ```json) in your JSON output. Just output the JSON.
 """
         def _generate():
+            config = genai.GenerationConfig(
+                response_mime_type="application/json",
+                response_schema=RepositorySummaryResponse
+            )
             # Attempt with primary model
             try:
                 model = genai.GenerativeModel(self.generation_model)
                 res = model.generate_content(
                     prompt,
-                    generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+                    generation_config=config,
                     request_options=RequestOptions(timeout=self.timeout)
                 )
                 return res.text
@@ -178,20 +188,40 @@ Do not write markdown wrapper tags (like ```json) in your JSON output. Just outp
                 model = genai.GenerativeModel(self.generation_fallback_model)
                 res = model.generate_content(
                     prompt,
-                    generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+                    generation_config=config,
                     request_options=RequestOptions(timeout=self.timeout)
                 )
                 return res.text
 
         raw_response = self._call_with_retry(_generate)
         
+        # Robust cleaning and JSON extraction
+        cleaned_json = raw_response.strip()
+        if cleaned_json.startswith("```json"):
+            cleaned_json = cleaned_json[7:]
+        elif cleaned_json.startswith("```"):
+            cleaned_json = cleaned_json[3:]
+        if cleaned_json.endswith("```"):
+            cleaned_json = cleaned_json[:-3]
+        cleaned_json = cleaned_json.strip()
+
+        # Extract text from first '{' to last '}' to handle any conversational text/trailing code ticks safely
+        start_idx = cleaned_json.find("{")
+        end_idx = cleaned_json.rfind("}")
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            cleaned_json = cleaned_json[start_idx:end_idx + 1]
+
         try:
             import json
-            parsed = json.loads(raw_response)
-            return parsed.get("summary", ""), parsed.get("architecture_overview", "")
+            parsed = json.loads(cleaned_json)
+            summary = parsed.get("summary")
+            architecture_overview = parsed.get("architecture_overview")
+            if summary is None or architecture_overview is None:
+                raise ValueError("Parsed JSON is missing 'summary' or 'architecture_overview' keys.")
+            return str(summary).strip(), str(architecture_overview).strip()
         except Exception as e:
-            # Fallback if JSON parsing fails
-            return f"Summary generation failed. Error: {str(e)}", f"Failed to parse architecture JSON. Raw output: {raw_response[:500]}"
+            # Raise clean error only if valid JSON object parsing fails
+            raise GeminiServiceError(f"Failed to parse summary/architecture JSON: {str(e)}") from e
 
     def generate_standalone_query(self, query: str, history: List[Any]) -> str:
         """

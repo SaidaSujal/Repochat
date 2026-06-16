@@ -99,3 +99,9 @@ class GeminiChatResponse(BaseModel):
     code_snippets: List[CodeSnippet] = Field(..., description="Code snippets referenced in the answer")
     citations: List[Citation] = Field(..., description="Source files and line number citations")
     follow_up_suggestions: List[str] = Field(..., description="Suggested follow-up questions")
+
+
+class RepositorySummaryResponse(BaseModel):
+    summary: str = Field(..., description="A concise, professional repository summary (1-2 paragraphs)")
+    architecture_overview: str = Field(..., description="A structured architecture overview outlining project layout and modules using Markdown")
+

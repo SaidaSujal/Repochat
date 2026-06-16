@@ -179,3 +179,53 @@ def test_chat_response_retains_resilient_defaults():
     assert res.code_snippets == []
     assert res.citations == []
     assert res.follow_up_suggestions == []
+
+
+def test_summary_architecture_parsing_clean_json(monkeypatch):
+    service = GeminiService()
+    monkeypatch.setattr(service, "_call_with_retry", lambda func, *args, **kwargs: '{"summary": "Clean summary", "architecture_overview": "Clean arch"}')
+    
+    summary, arch = service.generate_summary_and_architecture("test-repo", [], "")
+    assert summary == "Clean summary"
+    assert arch == "Clean arch"
+
+
+def test_summary_architecture_parsing_markdown_fences(monkeypatch):
+    service = GeminiService()
+    raw_response = """```json
+{
+  "summary": "Markdown summary",
+  "architecture_overview": "Markdown arch"
+}
+```"""
+    monkeypatch.setattr(service, "_call_with_retry", lambda func, *args, **kwargs: raw_response)
+    
+    summary, arch = service.generate_summary_and_architecture("test-repo", [], "")
+    assert summary == "Markdown summary"
+    assert arch == "Markdown arch"
+
+
+def test_summary_architecture_parsing_trailing_backticks_and_text(monkeypatch):
+    service = GeminiService()
+    raw_response = """{
+  "summary": "Trailing summary",
+  "architecture_overview": "Trailing arch"
+}
+```
+Here is some trailing conversational text that would normally crash json.loads."""
+    monkeypatch.setattr(service, "_call_with_retry", lambda func, *args, **kwargs: raw_response)
+    
+    summary, arch = service.generate_summary_and_architecture("test-repo", [], "")
+    assert summary == "Trailing summary"
+    assert arch == "Trailing arch"
+
+
+def test_summary_architecture_parsing_malformed_fallback(monkeypatch):
+    service = GeminiService()
+    monkeypatch.setattr(service, "_call_with_retry", lambda func, *args, **kwargs: "not a json object at all")
+    
+    with pytest.raises(GeminiServiceError) as exc_info:
+        service.generate_summary_and_architecture("test-repo", [], "")
+        
+    assert "Failed to parse summary/architecture JSON" in str(exc_info.value)
+
