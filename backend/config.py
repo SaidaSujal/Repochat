@@ -18,6 +18,13 @@ class Settings(BaseSettings):
     GEMINI_TIMEOUT_SEC: float = 30.0
     GEMINI_MAX_RETRIES: int = 4
 
+    @field_validator("GEMINI_API_KEY", "GITHUB_TOKEN")
+    @classmethod
+    def clean_credentials(cls, value: Optional[str]) -> Optional[str]:
+        if value:
+            return value.strip()
+        return value
+
     @field_validator(
         "GEMINI_EMBEDDING_MODEL",
         "GEMINI_EMBEDDING_FALLBACK_MODEL",

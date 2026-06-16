@@ -13,7 +13,7 @@ class GeminiService:
     def __init__(self):
         self.api_key = settings.GEMINI_API_KEY
         if self.api_key:
-            genai.configure(api_key=self.api_key)
+            genai.configure(api_key=self.api_key, transport="rest")
             
         # Model names loaded from centralized settings
         self.embedding_model = settings.GEMINI_EMBEDDING_MODEL

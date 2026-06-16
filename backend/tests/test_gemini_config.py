@@ -140,3 +140,17 @@ def test_gemini_retry_caps_backoff(monkeypatch):
     assert sleep_calls[0] == 30.0
     assert sleep_calls[1] == 30.0
 
+
+def test_credentials_sanitization(monkeypatch):
+    # Set environment variables with leading/trailing spaces and newlines/carriage returns
+    monkeypatch.setenv("GEMINI_API_KEY", "  \nAIzaSyMyKey\r\n  ")
+    monkeypatch.setenv("GITHUB_TOKEN", " \rgithub_pat_123token\n ")
+    
+    # Create new Settings object to load environment variables
+    custom_settings = Settings()
+    
+    # Verify that the keys are properly stripped of whitespace/newlines
+    assert custom_settings.GEMINI_API_KEY == "AIzaSyMyKey"
+    assert custom_settings.GITHUB_TOKEN == "github_pat_123token"
+
+
