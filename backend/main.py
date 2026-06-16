@@ -1,6 +1,10 @@
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 from typing import Dict, Any
+
+logger = logging.getLogger(__name__)
+
 
 from fastapi import FastAPI, Depends, HTTPException, Request, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -166,6 +170,20 @@ async def ingest_repository(
         )
     except Exception as e:
         # Avoid exposing internal stack traces/details
+        repo_id = None
+        try:
+            if "repo" in locals() and hasattr(repo, "id"):
+                repo_id = repo.id
+        except Exception:
+            pass
+
+        logger.exception(
+            "Ingestion failure: unexpected error in endpoint POST /api/ingest. "
+            "GitHub URL: %s, Repository ID: %s, Exception Type: %s",
+            payload.github_url,
+            repo_id,
+            type(e).__name__
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An unexpected error occurred during ingestion."

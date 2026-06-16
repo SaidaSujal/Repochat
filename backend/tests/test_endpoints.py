@@ -815,5 +815,32 @@ async def test_gemini_receives_only_normalized_history(monkeypatch):
         assert history_list[5].content == "valid 7"
 
 
+@pytest.mark.asyncio
+async def test_ingest_repository_unexpected_error_logging(monkeypatch, caplog):
+    # Mock IngestionService.ingest_repository to raise a generic Exception
+    async def mock_ingest_raise(*args, **kwargs):
+        raise ValueError("Simulated unexpected database or system failure")
+        
+    monkeypatch.setattr(IngestionService, "ingest_repository", mock_ingest_raise)
+
+    import logging
+    # Capture ERROR logs
+    with caplog.at_level(logging.ERROR):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.post("/api/ingest", json={"github_url": "https://github.com/error-owner/error-repo"})
+            
+    assert response.status_code == 500
+    assert response.json() == {"detail": "An unexpected error occurred during ingestion."}
+    
+    # Check that our log message with context was captured
+    log_records = [rec for rec in caplog.records if rec.levelname == "ERROR"]
+    assert len(log_records) > 0
+    log_message = log_records[0].message
+    assert "Ingestion failure: unexpected error in endpoint POST /api/ingest" in log_message
+    assert "https://github.com/error-owner/error-repo" in log_message
+    assert "ValueError" in log_message
+
+
+
 
 
