@@ -2,9 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import ThemeProvider from "@/components/ThemeProvider";
-import ThemeToggle from "@/components/ThemeToggle";
-import Link from "next/link";
-import { BookOpen } from "lucide-react";
+import Navbar from "@/components/Navbar";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -30,17 +28,7 @@ export default function RootLayout({
             </div>
           )}
           {/* Header */}
-          <header className={`sticky ${isApiMissing ? 'top-8' : 'top-0'} z-40 w-full border-b border-rc-border bg-rc-bg/80 dark:bg-rc-bg/85 backdrop-blur-md`}>
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-              <Link href="/" className="flex items-center gap-2 font-bold text-xl tracking-tight text-rc-primary hover:opacity-90 transition-opacity rounded-rc-md rc-focus-ring" aria-label="RepoChat home page">
-                <BookOpen className="h-6 w-6" />
-                <span>RepoChat</span>
-              </Link>
-              <div className="flex items-center gap-4">
-                <ThemeToggle />
-              </div>
-            </div>
-          </header>
+          <Navbar />
 
           {/* Main Content */}
           <main className="flex-1 flex flex-col">

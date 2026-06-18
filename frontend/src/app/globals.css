@@ -11,16 +11,19 @@
 
 /* ─── 1. Design Tokens ─── */
 @layer base {
+  html {
+    scroll-behavior: smooth;
+  }
   :root {
     /* ── Background ── */
-    --rc-bg: #fafafa;
-    --rc-bg-secondary: #f4f4f5;
-    --rc-bg-tertiary: #e4e4e7;
+    --rc-bg: #f8fbf8;
+    --rc-bg-secondary: #f4f4f4;
+    --rc-bg-tertiary: #e5e7eb;
 
-    /* ── Foreground ── */
-    --rc-foreground: #09090b;
-    --rc-foreground-secondary: #52525b;
-    --rc-foreground-muted: #71717a;
+    /* ── Foreground (Charcoal / Near-black) ── */
+    --rc-foreground: #18181b;
+    --rc-foreground-secondary: #4b5563;
+    --rc-foreground-muted: #6b7280;
 
     /* ── Card ── */
     --rc-card: #ffffff;
@@ -28,28 +31,28 @@
 
     /* ── Border ── */
     --rc-border: #e4e4e7;
-    --rc-border-subtle: #f4f4f5;
+    --rc-border-subtle: #f3f4f6;
 
-    /* ── Primary (Refined Blue) ── */
-    --rc-primary: #2563eb;
-    --rc-primary-hover: #1d4ed8;
+    /* ── Primary (Minimal Blue-Violet CTA Accent) ── */
+    --rc-primary: #6366f1;
+    --rc-primary-hover: #4f46e5;
     --rc-primary-foreground: #ffffff;
-    --rc-primary-muted: #dbeafe;
+    --rc-primary-muted: rgba(99, 102, 241, 0.08);
 
     /* ── Secondary ── */
     --rc-secondary: #f4f4f5;
     --rc-secondary-hover: #e4e4e7;
-    --rc-secondary-foreground: #3f3f46;
+    --rc-secondary-foreground: #374151;
 
     /* ── Muted ── */
-    --rc-muted: #f4f4f5;
-    --rc-muted-foreground: #71717a;
+    --rc-muted: #f3f4f6;
+    --rc-muted-foreground: #6b7280;
 
-    /* ── Accent (Violet) ── */
+    /* ── Accent (Violet Accent) ── */
     --rc-accent: #7c3aed;
     --rc-accent-hover: #6d28d9;
     --rc-accent-foreground: #ffffff;
-    --rc-accent-muted: #ede9fe;
+    --rc-accent-muted: rgba(124, 58, 237, 0.08);
 
     /* ── Status ── */
     --rc-success: #16a34a;
@@ -60,10 +63,10 @@
     --rc-destructive-muted: #fee2e2;
 
     /* ── Shadows ── */
-    --rc-shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.03);
-    --rc-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.04);
-    --rc-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.04);
-    --rc-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.06), 0 4px 6px -4px rgb(0 0 0 / 0.04);
+    --rc-shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+    --rc-shadow-sm: 0 2px 4px 0 rgba(0, 0, 0, 0.03), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
+    --rc-shadow-md: 0 6px 12px -2px rgba(0, 0, 0, 0.04), 0 3px 6px -3px rgba(0, 0, 0, 0.03);
+    --rc-shadow-lg: 0 16px 24px -4px rgba(0, 0, 0, 0.05), 0 8px 12px -6px rgba(0, 0, 0, 0.04);
 
     /* ── Border Radius ── */
     --rc-radius-sm: 0.375rem;
@@ -75,12 +78,12 @@
 
     /* ── Transitions ── */
     --rc-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --rc-transition-base: 200ms cubic-bezier(0.4, 0, 0.2, 1);
-    --rc-transition-slow: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    --rc-transition-base: 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    --rc-transition-slow: 400ms cubic-bezier(0.16, 1, 0.3, 1);
 
     /* ── Glassmorphism ── */
-    --rc-glass-bg: rgba(255, 255, 255, 0.72);
-    --rc-glass-border: rgba(255, 255, 255, 0.18);
+    --rc-glass-bg: rgba(255, 255, 255, 0.6);
+    --rc-glass-border: rgba(0, 0, 0, 0.06);
   }
 
   .dark {
@@ -102,11 +105,11 @@
     --rc-border: #27272a;
     --rc-border-subtle: #1e1e21;
 
-    /* ── Primary (Brighter Blue in Dark) ── */
-    --rc-primary: #3b82f6;
-    --rc-primary-hover: #60a5fa;
+    /* ── Primary ── */
+    --rc-primary: #818cf8;
+    --rc-primary-hover: #a5b4fc;
     --rc-primary-foreground: #ffffff;
-    --rc-primary-muted: rgba(59, 130, 246, 0.12);
+    --rc-primary-muted: rgba(129, 140, 248, 0.12);
 
     /* ── Secondary ── */
     --rc-secondary: #27272a;
@@ -117,7 +120,7 @@
     --rc-muted: #27272a;
     --rc-muted-foreground: #71717a;
 
-    /* ── Accent (Lighter Violet in Dark) ── */
+    /* ── Accent ── */
     --rc-accent: #a78bfa;
     --rc-accent-hover: #8b5cf6;
     --rc-accent-foreground: #ffffff;
@@ -131,15 +134,15 @@
     --rc-destructive: #ef4444;
     --rc-destructive-muted: rgba(239, 68, 68, 0.12);
 
-    /* ── Shadows (Deeper for dark surfaces) ── */
+    /* ── Shadows ── */
     --rc-shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.2);
     --rc-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.25), 0 1px 2px -1px rgb(0 0 0 / 0.2);
     --rc-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.3), 0 2px 4px -2px rgb(0 0 0 / 0.2);
     --rc-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.35), 0 4px 6px -4px rgb(0 0 0 / 0.25);
 
     /* ── Glassmorphism ── */
-    --rc-glass-bg: rgba(24, 24, 27, 0.72);
-    --rc-glass-border: rgba(255, 255, 255, 0.06);
+    --rc-glass-bg: rgba(9, 9, 11, 0.75);
+    --rc-glass-border: rgba(255, 255, 255, 0.08);
   }
 
   /* Preserve existing body transition behavior */
@@ -161,7 +164,7 @@
 @keyframes rc-slide-up {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
@@ -172,7 +175,7 @@
 @keyframes rc-slide-down {
   from {
     opacity: 0;
-    transform: translateY(-8px);
+    transform: translateY(-12px);
   }
   to {
     opacity: 1;
@@ -192,10 +195,10 @@
 @keyframes rc-pulse-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0);
   }
   50% {
-    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15);
   }
 }
 
@@ -207,6 +210,47 @@
     transform: rotate(360deg);
   }
 }
+
+/* 3D isometric floating animations representing physical layers */
+@keyframes float-iso-1 {
+  0%, 100% {
+    transform: translate3d(0, 0, 8px);
+  }
+  50% {
+    transform: translate3d(0, 0, 20px);
+  }
+}
+
+@keyframes float-iso-2 {
+  0%, 100% {
+    transform: translate3d(0, 0, 68px);
+  }
+  50% {
+    transform: translate3d(0, 0, 84px);
+  }
+}
+
+@keyframes float-iso-3 {
+  0%, 100% {
+    transform: translate3d(0, 0, 140px);
+  }
+  50% {
+    transform: translate3d(0, 0, 162px);
+  }
+}
+
+.animate-float-iso-1 {
+  animation: float-iso-1 6s ease-in-out infinite;
+}
+
+.animate-float-iso-2 {
+  animation: float-iso-2 7s ease-in-out infinite;
+}
+
+.animate-float-iso-3 {
+  animation: float-iso-3 5.5s ease-in-out infinite;
+}
+
 
 /* ─── 3. Component Utilities ─── */
 @layer components {
@@ -306,10 +350,84 @@
   /* ── Glassmorphism ── */
   .rc-glass {
     background: var(--rc-glass-bg);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     border: 1px solid var(--rc-glass-border);
+    box-shadow: 
+      inset 0 1px 1px 0 hsla(0, 0%, 100%, 0.5),
+      0 4px 6px -1px rgba(0, 0, 0, 0.05),
+      0 2px 4px -2px rgba(0, 0, 0, 0.04);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   }
+
+  .dark .rc-glass {
+    box-shadow: 
+      inset 0 1px 0 0 hsla(0, 0%, 100%, 0.05),
+      0 4px 6px -1px rgba(0, 0, 0, 0.3),
+      0 2px 4px -2px rgba(0, 0, 0, 0.2);
+  }
+
+  /* ── Premium Card Hover Border & HSL Shadow Glows ── */
+  .hover-glow-primary:hover {
+    border-color: hsla(220, 90%, 60%, 0.45) !important;
+    box-shadow: 
+      inset 0 1px 1px 0 hsla(0, 0%, 100%, 0.5),
+      0 0 20px 2px hsla(220, 90%, 60%, 0.15),
+      0 8px 16px -4px rgba(0, 0, 0, 0.08) !important;
+  }
+  .dark .hover-glow-primary:hover {
+    border-color: hsla(220, 90%, 65%, 0.5) !important;
+    box-shadow: 
+      inset 0 1px 0 0 hsla(0, 0%, 100%, 0.05),
+      0 0 24px 4px hsla(220, 90%, 65%, 0.18),
+      0 12px 20px -8px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  .hover-glow-success:hover {
+    border-color: hsla(140, 70%, 50%, 0.45) !important;
+    box-shadow: 
+      inset 0 1px 1px 0 hsla(0, 0%, 100%, 0.5),
+      0 0 20px 2px hsla(140, 70%, 50%, 0.12),
+      0 8px 16px -4px rgba(0, 0, 0, 0.08) !important;
+  }
+  .dark .hover-glow-success:hover {
+    border-color: hsla(140, 70%, 55%, 0.5) !important;
+    box-shadow: 
+      inset 0 1px 0 0 hsla(0, 0%, 100%, 0.05),
+      0 0 24px 4px hsla(140, 70%, 55%, 0.15),
+      0 12px 20px -8px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  .hover-glow-indigo:hover {
+    border-color: hsla(250, 80%, 60%, 0.45) !important;
+    box-shadow: 
+      inset 0 1px 1px 0 hsla(0, 0%, 100%, 0.5),
+      0 0 20px 2px hsla(250, 80%, 60%, 0.15),
+      0 8px 16px -4px rgba(0, 0, 0, 0.08) !important;
+  }
+  .dark .hover-glow-indigo:hover {
+    border-color: hsla(250, 80%, 65%, 0.5) !important;
+    box-shadow: 
+      inset 0 1px 0 0 hsla(0, 0%, 100%, 0.05),
+      0 0 24px 4px hsla(250, 80%, 65%, 0.18),
+      0 12px 20px -8px rgba(0, 0, 0, 0.4) !important;
+  }
+
+  .hover-glow-accent:hover {
+    border-color: hsla(270, 80%, 60%, 0.45) !important;
+    box-shadow: 
+      inset 0 1px 1px 0 hsla(0, 0%, 100%, 0.5),
+      0 0 20px 2px hsla(270, 80%, 60%, 0.15),
+      0 8px 16px -4px rgba(0, 0, 0, 0.08) !important;
+  }
+  .dark .hover-glow-accent:hover {
+    border-color: hsla(270, 80%, 65%, 0.5) !important;
+    box-shadow: 
+      inset 0 1px 0 0 hsla(0, 0%, 100%, 0.05),
+      0 0 24px 4px hsla(270, 80%, 65%, 0.18),
+      0 12px 20px -8px rgba(0, 0, 0, 0.4) !important;
+  }
+
 
   /* ── Focus Ring ── */
   .rc-focus-ring {
@@ -317,6 +435,45 @@
   }
   .rc-focus-ring:focus-visible {
     box-shadow: 0 0 0 2px var(--rc-bg), 0 0 0 4px var(--rc-primary);
+  }
+
+  /* ── Scroll Reveal Utilities ── */
+  .reveal-on-scroll {
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1), transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, opacity;
+  }
+
+  .reveal-on-scroll.is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  /* Staggered grid delay mappings */
+  .reveal-delay-50 { transition-delay: 50ms; }
+  .reveal-delay-100 { transition-delay: 100ms; }
+  .reveal-delay-150 { transition-delay: 150ms; }
+  .reveal-delay-200 { transition-delay: 200ms; }
+  .reveal-delay-250 { transition-delay: 250ms; }
+  .reveal-delay-300 { transition-delay: 300ms; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal-on-scroll {
+      transition: opacity 0.8s ease !important;
+      transform: none !important;
+    }
+  }
+
+  /* ── Premium Hover Lift ── */
+  .hover-lift {
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform, box-shadow;
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-4px);
+    cursor: pointer;
   }
 }
 
